@@ -12,7 +12,11 @@ MODEL = {  # ponytail: hand-tuned defaults. Every value is a calibration knob (c
     'fuel_start_kg': 75.0,    # 2026 fuel is energy-limited (3000 MJ/h); teams don't publish loads
     'fuel_s_per_kg': 0.03,    # lap time cost per kg
     'min_mass_kg': 768.0,     # 2026 minimum mass incl. driver, without fuel
-    'pit_loss': 22.0,         # used when the circuit API has no value
+    'pit_loss': 22.0,         # last resort when neither the circuit API, the session nor the circuit catalogue has a value
+    'sc_pit_ratio': 0.634,    # SC / VSC pit loss as a share of the green one: MultiViewer's ratios, identical at all 32
+    'vsc_pit_ratio': 0.723,   # circuits in its catalogue. Only used when MultiViewer has no entry for the circuit
+    'neutral_lap_ratio': 1.15,  # a lap whose field median is this much slower than the session's is not green (SC starts,
+                                # red-flag restarts). Measured: drying-track green laps <= 1.10x, SC laps >= 1.16x
     'sc_prob': 0.35,          # chance of a (V)SC per race, spread evenly over laps
     'sc_laps': 4,
     'sc_lap_factor': 1.35,
@@ -92,26 +96,116 @@ def predict(model, drv, lap, cmp, age):
     return _base(model, drv) + model['off'].get(cmp, 0) + model['deg'].get(cmp, 0.05) * age + model['trend'] * lap
 
 
-def priors_from(laps, m=MODEL):
-    """Compound offsets/deg from practice long runs -> a 'prior' dict for the race (FP fuel loads are unknown)."""
-    long_runs = [l for l in clean(laps, m) if sum(1 for o in laps if o['drv'] == l['drv'] and o['cmp'] == l['cmp']) >= 6]
-    fp = fit(long_runs, 1, {**m, 'fuel_s_per_kg': 0.0, 'half_life_laps': 1e9})  # lap numbers restart per session
-    seen = {l['cmp'] for l in long_runs}
-    return {c: ((fp['off'][c] - fp['off'].get('MEDIUM', 0), fp['deg'][c]) if c in seen else v) for c, v in m['prior'].items()}
-
-
-def pit_loss_from(laps, default):
-    """Median (in-lap + out-lap - 2 normal laps) over green-flag stops; for tracks the circuit API doesn't cover."""
-    by = {(l['drv'], l['lap']): l for l in laps}
-    norm = {}
-    for l in clean(laps):
-        norm.setdefault(l['drv'], []).append(l['t'])
+def stints(laps, min_laps=5):
+    """Practice long runs: >= min_laps consecutive laps (lap and tyre age both +1) on one set, cool-down laps dropped.
+    Pairing quali-sim laps with race runs on the same compound would read the fuel difference as tyre wear."""
+    runs, cur = [], []
+    for l in sorted((l for l in laps if l['t'] and not l['pit'] and not l['sc'] and l['lap'] > 1 and l['cmp'] in MODEL['life']),
+                    key=lambda l: (l['drv'], l.get('sess', 0), l['lap'])):
+        p = cur[-1] if cur else None
+        if p and (p['drv'], p.get('sess', 0), p['cmp'], p['lap'] + 1, p['age'] + 1) == (l['drv'], l.get('sess', 0), l['cmp'], l['lap'], l['age']):
+            cur.append(l)
+        else:
+            runs.append(cur)
+            cur = [l]
+    runs.append(cur)
     out = []
+    for r in runs:
+        best = min((l['t'] for l in r), default=0)
+        r = [l for l in r if l['t'] < best * 1.04]  # push/cool-down alternation leaves too few laps and drops out
+        if len(r) >= min_laps:
+            out.append(r)
+    return out
+
+
+def priors_from(laps, total, m=MODEL):
+    """Tyre deg per compound from practice long runs -> a 'prior' dict for the race. Each run gets its own intercept
+    (fuel load, track state), so only the slope within a run is used. Fuel burns during a run too, so the slope is
+    corrected with the same fuel knobs the race model uses. Compound offsets keep the model prior: unknown FP fuel
+    loads make them unrecoverable. A compound needs two runs."""
+    runs, deg = stints(laps), {}
+    for c in m['prior']:
+        rs = [r for r in runs if r[0]['cmp'] == c]
+        if len(rs) < 2:
+            continue
+        x = np.concatenate([[l['age'] - np.mean([o['age'] for o in r]) for l in r] for r in rs])
+        y = np.concatenate([[l['t'] - np.mean([o['t'] for o in r]) for l in r] for r in rs])
+        slope = float(x @ y / (x @ x)) if x @ x else 0.0
+        deg[c] = max(0.0, slope + m['fuel_s_per_kg'] * m['fuel_start_kg'] / max(total, 1))
+    return {c: (off, deg.get(c, d)) for c, (off, d) in m['prior'].items()}
+
+
+def stops_from_laps(laps):
+    """Stops when PitStopSeries isn't flowing: in-lap n and out-lap n+1 both pit-flagged. Lap 1 never counts
+    (cars leave the pit lane for the grid and pit-lane starters are not stops)."""
+    flagged = {(l['drv'], l['lap']) for l in laps if l['pit']}
+    return [{'drv': d, 'lap': n} for d, n in sorted(flagged) if n >= 2 and (d, n + 1) in flagged and (d, n - 1) not in flagged]
+
+
+def pit_loss_samples(laps, stops, m=MODEL):
+    """Time lost by each green-flag stop. Preferred: in-lap and out-lap against the driver's own laps either side, minus
+    how much the field's lap time moved over the same laps. Otherwise: against the field on those same two laps,
+    corrected for the driver's pace. Both cancel track evolution, fuel and weather. Over the 13 races of 2026 that
+    MultiViewer covers, the session median is within 1.5 s of its value on average.
+    stops: [{'drv', 'lap', 'stationary'?}] with lap = the in-lap (PitStopSeries 'Lap')."""
+    by = {(l['drv'], l['lap']): l for l in laps}
+    pitted = {(s['drv'], s['lap']) for s in stops} | {(s['drv'], s['lap'] + 1) for s in stops}
+    field = {}
     for l in laps:
-        nxt = by.get((l['drv'], l['lap'] + 1))
-        if l['pit'] and l['lap'] > 1 and nxt and nxt['pit'] and l['t'] and nxt['t'] and not (l['sc'] or nxt['sc'])                 and norm.get(l['drv']):
-            out.append(l['t'] + nxt['t'] - 2 * np.median(norm[l['drv']]))
-    return float(np.median(out)) if out else default
+        if l['t'] and l['lap'] > 1 and (l['drv'], l['lap']) not in pitted:
+            field.setdefault(l['lap'], []).append(l['t'])
+    field = {n: float(np.median(v)) for n, v in field.items() if len(v) >= 3}
+    if not field:
+        return []
+    base = np.median(list(field.values()))
+    neutral = {n for n, v in field.items() if v > m['neutral_lap_ratio'] * base} | {l['lap'] for l in laps if l['sc']}
+    pace = {}
+    for l in laps:
+        n = l['lap']
+        if l['t'] and n in field and n not in neutral and (l['drv'], n) not in pitted:
+            pace.setdefault(l['drv'], []).append(l['t'] - field[n])
+    # a 12 s wheel-nut problem or a stop-and-go is not the pit loss of the next stop: swap in the typical stationary time
+    stat = [s['stationary'] for s in stops if s.get('stationary')]
+    typical_stat = float(np.median(stat)) if stat else None
+    out = []
+    for s in stops:
+        n, a, b = s['lap'], by.get((s['drv'], s['lap'])), by.get((s['drv'], s['lap'] + 1))
+        if n < 2 or not (a and b and a['t'] and b['t']) or {n, n + 1} & neutral or not {n, n + 1} <= set(field):
+            continue
+        extra = s['stationary'] - typical_stat if s.get('stationary') and typical_stat else 0.0
+        p, q = by.get((s['drv'], n - 1)), by.get((s['drv'], n + 2))
+        if (n >= 3 and p and q and p['t'] and q['t'] and not {n - 1, n + 2} & neutral and {n - 1, n + 2} <= set(field)
+                and (s['drv'], n - 1) not in pitted and (s['drv'], n + 2) not in pitted):
+            out.append(a['t'] - p['t'] + b['t'] - q['t'] - (field[n] - field[n - 1]) - (field[n + 1] - field[n + 2]) - extra)
+        else:
+            own = float(np.median(pace[s['drv']])) if len(pace.get(s['drv'], ())) >= 3 else 0.0
+            out.append(a['t'] + b['t'] - field[n] - field[n + 1] - 2 * own - extra)
+    out = np.array([x for x in out if x > 0])
+    if len(out) >= 3:  # drop stop-and-go penalties and botched stops
+        med, mad = np.median(out), np.median(np.abs(out - np.median(out))) * 1.4826
+        out = out[np.abs(out - med) <= 3 * max(mad, 0.5)]
+    return [float(x) for x in out]
+
+
+def pit_loss(laps=(), stops=None, known=None, weekend=None, typical=None, m=MODEL):
+    """Pit loss {'normal', 'sc', 'vsc', 'source', 'n'} from the best available source:
+    circuit API value > this session's green stops (>= 3) > an earlier race of the weekend (sprint)
+    > median over the circuit catalogue > MODEL default."""
+    if known and known.get('normal'):
+        normal, src, n = float(known['normal']), 'circuit data', 0
+    else:
+        s = pit_loss_samples(laps, stops if stops is not None else stops_from_laps(laps), m)
+        if len(s) >= 3:  # two samples were up to 15 s off in the 2026 races
+            normal, src, n = float(np.median(s)), 'this session', len(s)
+        elif weekend:
+            normal, src, n = weekend['normal'], weekend['source'], weekend['n']
+        elif typical:
+            normal, src, n = typical, 'typical circuit', 0
+        else:
+            normal, src, n = m['pit_loss'], 'default', 0
+    known = known or {}
+    return {'normal': normal, 'sc': float(known.get('sc') or normal * m['sc_pit_ratio']),
+            'vsc': float(known.get('vsc') or normal * m['vsc_pit_ratio']), 'source': src, 'n': n}
 
 
 def gap_s(d, lap_s=95.0):
@@ -240,7 +334,7 @@ def backtest(path, fit_to=20):
     from .live import laps_from_archive
     st, laps = laps_from_archive(path)
     total = st.session()['total']
-    loss = (st.track.pit_loss if st.track else None) or {'normal': pit_loss_from(laps, MODEL['pit_loss'])}
+    loss = st.pit_loss()
     model = fit([l for l in laps if l['lap'] <= fit_to], total)
 
     # 1) lap-time prediction on later clean laps of drivers still on their lap-`fit_to` tyres
