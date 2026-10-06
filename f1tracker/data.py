@@ -18,6 +18,7 @@ CACHE = APP_DIR / 'cache'
 UA = {'User-Agent': 'f1tracker/0.1'}  # MultiViewer rejects the default python-requests agent
 JOLPICA = 'https://api.jolpi.ca/ergast/f1'
 ARCHIVE = 'https://livetiming.formula1.com/static/'
+MIRROR = 'https://livetiming-mirror.fastf1.dev/static/'  # FastF1's mirror of the archive (fastf1._api.base_url_mirror)
 
 TEAM_COLOURS = {  # Jolpica constructorId -> live timing TeamColour
     'mercedes': '00D7B6', 'ferrari': 'ED1131', 'mclaren': 'F47600', 'red_bull': '4781D7', 'rb': '6C98FF',
@@ -34,6 +35,8 @@ def fetch(url, max_age=None, raw=False):
     else:
         try:
             r = requests.get(url, headers=UA, timeout=30)
+            if r.status_code >= 400 and url.startswith(ARCHIVE):  # FastF1's fallback; F1 refuses most of 2022
+                r = requests.get(MIRROR + url[len(ARCHIVE):], headers=UA, timeout=30)
             r.raise_for_status()
             b = r.content
         except requests.RequestException:
@@ -90,9 +93,21 @@ def next_race(now=None):
     return next((r for r in schedule() if r['sessions'][-1][1] + timedelta(hours=3) > now), None)
 
 
+def round_counted(rnd, year='current'):
+    """{'Race': bool, 'Sprint': bool}: whether Jolpica has results for that session of the round, i.e. whether its
+    points are already in the standings. (The standings' own 'round' moves on after the sprint alone.)"""
+    return {kind: bool(fetch(f'{JOLPICA}/{year}/{rnd}/{ep}.json?limit=1', 300)['MRData']['RaceTable']['Races'])
+            for kind, ep in (('Race', 'results'), ('Sprint', 'sprint'))}
+
+
 def circuit(key, year):
     """Track outline (x/y in the same 1/10 m frame as Position.z, starting at the line), corners, pit loss, rotation."""
     return fetch(f'https://api.multiviewer.app/api/v1/circuits/{key}/{year}')
+
+
+def circuit_catalog():
+    """{circuit key: {'name', 'years', 'pitLoss': {'normal', 'sc', 'vsc'}, ...}} for every circuit MultiViewer knows."""
+    return fetch('https://api.multiviewer.app/api/v1/circuits', 7 * 86400)
 
 
 def past_sessions(year=None, n=15):
@@ -101,12 +116,52 @@ def past_sessions(year=None, n=15):
     out = []
     for m in fetch(f'{ARCHIVE}{year}/Index.json', 600)['Meetings']:
         for s in m['Sessions']:
+            if not (s.get('Path') and s.get('EndDate')):  # cancelled/unpublished sessions (older years) lack them
+                continue
             h, mi, _ = s['GmtOffset'].lstrip('-').split(':')
             off = timedelta(hours=int(h), minutes=int(mi)) * (-1 if s['GmtOffset'].startswith('-') else 1)
             end = datetime.fromisoformat(s['EndDate']).replace(tzinfo=timezone.utc) - off
-            if s.get('Path') and end < datetime.now(timezone.utc) - timedelta(minutes=30):
+            if end < datetime.now(timezone.utc) - timedelta(minutes=30):
                 out.append((f"{year} {m['Name']} - {s['Name']}", s['Path']))
     return out[::-1][:n]
+
+
+FIRST_ARCHIVE_YEAR = 2018  # nothing earlier on F1's archive or FastF1's mirror
+
+
+def replay_meetings(year):
+    """[(meeting, [(session, path)])] in calendar order: finished sessions from the archive index, plus the ones it
+    leaves out (2018 Australia, 2024 before Spain, 2023 Qatar after FP1), whose paths FastF1's schedule gives,
+    kept only if the archive (or FastF1's mirror, which has the 2022 that F1 refuses) has their timing."""
+    try:
+        index = past_sessions(year, 999)[::-1]
+    except requests.HTTPError:
+        index = []
+    meetings = {}  # meeting folder -> (name, sessions); the folder, because index and FastF1 names could differ
+    for label, path in index:
+        name, session = label[5:].rsplit(' - ', 1)
+        meetings.setdefault(path.split('/')[1], (name, []))[1].append((session, path))
+    known = {p for _, ss in meetings.values() for _, p in ss}
+
+    import fastf1
+    from concurrent.futures import ThreadPoolExecutor
+    extra, now = [], datetime.now(timezone.utc)
+    for _, ev in fastf1.get_event_schedule(year).iterrows():
+        for i in range(1, 6):
+            name, start = ev[f'Session{i}'], ev[f'Session{i}DateUtc']
+            if name and name != 'None' and start.tz_localize('UTC') + timedelta(hours=4) < now:
+                path = ev.get_session(name).api_path.removeprefix('/static/')
+                if path not in known:
+                    extra.append((ev['EventName'], name, path))
+
+    def exists(path):
+        return any(requests.head(f'{base}{path}TimingData.jsonStream', headers=UA, timeout=30).status_code == 200
+                   for base in (ARCHIVE, MIRROR))
+    with ThreadPoolExecutor(16) as pool:
+        for (meeting, session, path), ok in zip(extra, pool.map(exists, [e[2] for e in extra])):
+            if ok:
+                meetings.setdefault(path.split('/')[1], (meeting, []))[1].append((session, path))
+    return [meetings[k] for k in sorted(meetings)]  # folders start with the race date
 
 
 def archive_stream(path, topic):
