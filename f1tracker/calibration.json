@@ -1,0 +1,410 @@
+{
+ "eras": {
+  "2018-2021": {
+   "_fitted_on": [
+    "2018 Australian Grand Prix",
+    "2018 Bahrain Grand Prix",
+    "2018 Chinese Grand Prix",
+    "2018 Azerbaijan Grand Prix",
+    "2018 Spanish Grand Prix",
+    "2018 Monaco Grand Prix",
+    "2018 Canadian Grand Prix",
+    "2018 French Grand Prix",
+    "2018 Austrian Grand Prix",
+    "2018 British Grand Prix",
+    "2018 German Grand Prix",
+    "2018 Hungarian Grand Prix",
+    "2018 Belgian Grand Prix",
+    "2018 Italian Grand Prix",
+    "2018 Singapore Grand Prix",
+    "2018 Russian Grand Prix",
+    "2018 Japanese Grand Prix",
+    "2018 United States Grand Prix",
+    "2018 Mexican Grand Prix",
+    "2018 Brazilian Grand Prix",
+    "2018 Abu Dhabi Grand Prix",
+    "2019 Australian Grand Prix",
+    "2019 Bahrain Grand Prix",
+    "2019 Chinese Grand Prix",
+    "2019 Azerbaijan Grand Prix",
+    "2019 Spanish Grand Prix",
+    "2019 Monaco Grand Prix",
+    "2019 Canadian Grand Prix",
+    "2019 French Grand Prix",
+    "2019 Austrian Grand Prix",
+    "2019 British Grand Prix",
+    "2019 German Grand Prix",
+    "2019 Hungarian Grand Prix",
+    "2019 Belgian Grand Prix",
+    "2019 Italian Grand Prix",
+    "2019 Singapore Grand Prix",
+    "2019 Russian Grand Prix",
+    "2019 Japanese Grand Prix",
+    "2019 Mexican Grand Prix",
+    "2019 United States Grand Prix",
+    "2019 Brazilian Grand Prix",
+    "2019 Abu Dhabi Grand Prix",
+    "2020 Austrian Grand Prix",
+    "2020 Styrian Grand Prix",
+    "2020 Hungarian Grand Prix",
+    "2020 British Grand Prix",
+    "2020 70th Anniversary Grand Prix",
+    "2020 Spanish Grand Prix",
+    "2020 Belgian Grand Prix",
+    "2020 Italian Grand Prix",
+    "2020 Tuscan Grand Prix",
+    "2020 Russian Grand Prix",
+    "2020 Eifel Grand Prix",
+    "2020 Portuguese Grand Prix",
+    "2020 Emilia Romagna Grand Prix",
+    "2020 Turkish Grand Prix",
+    "2020 Bahrain Grand Prix",
+    "2020 Sakhir Grand Prix",
+    "2020 Abu Dhabi Grand Prix",
+    "2021 Bahrain Grand Prix",
+    "2021 Emilia Romagna Grand Prix",
+    "2021 Portuguese Grand Prix",
+    "2021 Spanish Grand Prix",
+    "2021 Monaco Grand Prix",
+    "2021 Azerbaijan Grand Prix",
+    "2021 French Grand Prix",
+    "2021 Styrian Grand Prix",
+    "2021 Austrian Grand Prix",
+    "2021 British Grand Prix",
+    "2021 British Grand Prix sprint",
+    "2021 Hungarian Grand Prix",
+    "2021 Dutch Grand Prix",
+    "2021 Italian Grand Prix",
+    "2021 Italian Grand Prix sprint",
+    "2021 Russian Grand Prix",
+    "2021 Turkish Grand Prix",
+    "2021 United States Grand Prix",
+    "2021 Mexico City Grand Prix",
+    "2021 S\u00e3o Paulo Grand Prix",
+    "2021 S\u00e3o Paulo Grand Prix sprint",
+    "2021 Qatar Grand Prix",
+    "2021 Saudi Arabian Grand Prix",
+    "2021 Abu Dhabi Grand Prix"
+   ],
+   "sc_per_race": 0.783,
+   "sc_laps": 4.0,
+   "vsc_per_race": 0.518,
+   "vsc_laps": 2.0,
+   "sc_lap_factor": 1.493,
+   "vsc_lap_factor": 1.277,
+   "red_per_race": 0.12,
+   "pass": [
+    0.9835,
+    0.6708,
+    -5.0727
+   ],
+   "prior": {
+    "SOFT": [
+     -0.278,
+     0.0809
+    ],
+    "MEDIUM": [
+     0.0,
+     0.054
+    ],
+    "HARD": [
+     0.218,
+     0.0485
+    ],
+    "INTERMEDIATE": [
+     6.0,
+     0.05
+    ],
+    "WET": [
+     10.0,
+     0.05
+    ]
+   },
+   "life": {
+    "SOFT": 30,
+    "MEDIUM": 35,
+    "HARD": 38,
+    "INTERMEDIATE": 99,
+    "WET": 99
+   },
+   "pass_restart": [
+    0.3819,
+    0.4536,
+    -5.6347
+   ],
+   "pit_neutral": [
+    -4.1355,
+    2.1338,
+    -3.1558,
+    1.8939,
+    2.2299,
+    1.6383,
+    -1.713
+   ],
+   "pit_neutral_sd": {
+    "sc": 2.011,
+    "vsc": 1.712
+   }
+  },
+  "2022-2025": {
+   "_fitted_on": [
+    "2022 Bahrain Grand Prix",
+    "2022 Saudi Arabian Grand Prix",
+    "2022 Australian Grand Prix",
+    "2022 Emilia Romagna Grand Prix sprint",
+    "2022 Emilia Romagna Grand Prix",
+    "2022 Miami Grand Prix",
+    "2022 Spanish Grand Prix",
+    "2022 Monaco Grand Prix",
+    "2022 Azerbaijan Grand Prix",
+    "2022 Canadian Grand Prix",
+    "2022 British Grand Prix",
+    "2022 Austrian Grand Prix sprint",
+    "2022 Austrian Grand Prix",
+    "2022 French Grand Prix",
+    "2022 Hungarian Grand Prix",
+    "2022 Belgian Grand Prix",
+    "2022 Dutch Grand Prix",
+    "2022 Italian Grand Prix",
+    "2022 Singapore Grand Prix",
+    "2022 Japanese Grand Prix",
+    "2022 United States Grand Prix",
+    "2022 Mexico City Grand Prix",
+    "2022 S\u00e3o Paulo Grand Prix sprint",
+    "2022 S\u00e3o Paulo Grand Prix",
+    "2022 Abu Dhabi Grand Prix",
+    "2023 Bahrain Grand Prix",
+    "2023 Saudi Arabian Grand Prix",
+    "2023 Australian Grand Prix",
+    "2023 Azerbaijan Grand Prix sprint",
+    "2023 Azerbaijan Grand Prix",
+    "2023 Miami Grand Prix",
+    "2023 Monaco Grand Prix",
+    "2023 Spanish Grand Prix",
+    "2023 Canadian Grand Prix",
+    "2023 Austrian Grand Prix sprint",
+    "2023 Austrian Grand Prix",
+    "2023 British Grand Prix",
+    "2023 Hungarian Grand Prix",
+    "2023 Belgian Grand Prix sprint",
+    "2023 Belgian Grand Prix",
+    "2023 Dutch Grand Prix",
+    "2023 Italian Grand Prix",
+    "2023 Singapore Grand Prix",
+    "2023 Japanese Grand Prix",
+    "2023 Qatar Grand Prix sprint",
+    "2023 Qatar Grand Prix",
+    "2023 United States Grand Prix sprint",
+    "2023 United States Grand Prix",
+    "2023 Mexico City Grand Prix",
+    "2023 S\u00e3o Paulo Grand Prix sprint",
+    "2023 S\u00e3o Paulo Grand Prix",
+    "2023 Las Vegas Grand Prix",
+    "2023 Abu Dhabi Grand Prix",
+    "2024 Bahrain Grand Prix",
+    "2024 Saudi Arabian Grand Prix",
+    "2024 Australian Grand Prix",
+    "2024 Japanese Grand Prix",
+    "2024 Chinese Grand Prix sprint",
+    "2024 Chinese Grand Prix",
+    "2024 Miami Grand Prix sprint",
+    "2024 Miami Grand Prix",
+    "2024 Emilia Romagna Grand Prix",
+    "2024 Monaco Grand Prix",
+    "2024 Canadian Grand Prix",
+    "2024 Spanish Grand Prix",
+    "2024 Austrian Grand Prix sprint",
+    "2024 Austrian Grand Prix",
+    "2024 British Grand Prix",
+    "2024 Hungarian Grand Prix",
+    "2024 Belgian Grand Prix",
+    "2024 Dutch Grand Prix",
+    "2024 Italian Grand Prix",
+    "2024 Azerbaijan Grand Prix",
+    "2024 Singapore Grand Prix",
+    "2024 United States Grand Prix sprint",
+    "2024 United States Grand Prix",
+    "2024 Mexico City Grand Prix",
+    "2024 S\u00e3o Paulo Grand Prix sprint",
+    "2024 S\u00e3o Paulo Grand Prix",
+    "2024 Las Vegas Grand Prix",
+    "2024 Qatar Grand Prix sprint",
+    "2024 Qatar Grand Prix",
+    "2024 Abu Dhabi Grand Prix",
+    "2025 Australian Grand Prix",
+    "2025 Chinese Grand Prix sprint",
+    "2025 Chinese Grand Prix",
+    "2025 Japanese Grand Prix",
+    "2025 Bahrain Grand Prix",
+    "2025 Saudi Arabian Grand Prix",
+    "2025 Miami Grand Prix sprint",
+    "2025 Miami Grand Prix",
+    "2025 Emilia Romagna Grand Prix",
+    "2025 Monaco Grand Prix",
+    "2025 Spanish Grand Prix",
+    "2025 Canadian Grand Prix",
+    "2025 Austrian Grand Prix",
+    "2025 British Grand Prix",
+    "2025 Belgian Grand Prix sprint",
+    "2025 Belgian Grand Prix",
+    "2025 Hungarian Grand Prix",
+    "2025 Dutch Grand Prix",
+    "2025 Italian Grand Prix",
+    "2025 Azerbaijan Grand Prix",
+    "2025 Singapore Grand Prix",
+    "2025 United States Grand Prix sprint",
+    "2025 United States Grand Prix",
+    "2025 Mexico City Grand Prix",
+    "2025 S\u00e3o Paulo Grand Prix sprint",
+    "2025 S\u00e3o Paulo Grand Prix",
+    "2025 Las Vegas Grand Prix",
+    "2025 Qatar Grand Prix sprint",
+    "2025 Qatar Grand Prix",
+    "2025 Abu Dhabi Grand Prix"
+   ],
+   "sc_per_race": 0.699,
+   "sc_laps": 4.0,
+   "vsc_per_race": 0.478,
+   "vsc_laps": 2.0,
+   "sc_lap_factor": 1.5,
+   "vsc_lap_factor": 1.329,
+   "red_per_race": 0.115,
+   "pass": [
+    0.3743,
+    0.7943,
+    -4.9358
+   ],
+   "prior": {
+    "SOFT": [
+     -0.549,
+     0.1162
+    ],
+    "MEDIUM": [
+     0.0,
+     0.077
+    ],
+    "HARD": [
+     0.142,
+     0.0526
+    ],
+    "INTERMEDIATE": [
+     6.0,
+     0.05
+    ],
+    "WET": [
+     10.0,
+     0.05
+    ]
+   },
+   "life": {
+    "SOFT": 25,
+    "MEDIUM": 29,
+    "HARD": 38,
+    "INTERMEDIATE": 99,
+    "WET": 99
+   },
+   "pass_restart": [
+    -0.0161,
+    0.5787,
+    -6.0301
+   ],
+   "pit_neutral": [
+    -6.6393,
+    4.5582,
+    0.5138,
+    1.0374,
+    2.9297,
+    2.1451,
+    -1.9909
+   ],
+   "pit_neutral_sd": {
+    "sc": 1.857,
+    "vsc": 2.322
+   }
+  },
+  "2026-": {
+   "_fitted_on": [
+    "2026 Australian Grand Prix",
+    "2026 Chinese Grand Prix sprint",
+    "2026 Chinese Grand Prix",
+    "2026 Japanese Grand Prix",
+    "2026 Miami Grand Prix sprint",
+    "2026 Miami Grand Prix",
+    "2026 Canadian Grand Prix sprint",
+    "2026 Canadian Grand Prix",
+    "2026 Monaco Grand Prix",
+    "2026 Barcelona Grand Prix",
+    "2026 Austrian Grand Prix",
+    "2026 British Grand Prix sprint",
+    "2026 British Grand Prix",
+    "2026 Belgian Grand Prix",
+    "2026 Hungarian Grand Prix",
+    "2026 Dutch Grand Prix sprint",
+    "2026 Dutch Grand Prix",
+    "2026 Italian Grand Prix",
+    "2026 Spanish Grand Prix",
+    "2026 Azerbaijan Grand Prix",
+    "2026 Bahrain Grand Prix"
+   ],
+   "sc_per_race": 0.619,
+   "sc_laps": 4.0,
+   "vsc_per_race": 0.952,
+   "vsc_laps": 2.0,
+   "sc_lap_factor": 1.411,
+   "vsc_lap_factor": 1.301,
+   "red_per_race": 0.143,
+   "pass": [
+    0.7864,
+    0.4784,
+    -5.1668
+   ],
+   "prior": {
+    "SOFT": [
+     0.061,
+     0.0436
+    ],
+    "MEDIUM": [
+     0.0,
+     0.0674
+    ],
+    "HARD": [
+     0.246,
+     0.0382
+    ],
+    "INTERMEDIATE": [
+     6.0,
+     0.05
+    ],
+    "WET": [
+     10.0,
+     0.05
+    ]
+   },
+   "life": {
+    "SOFT": 30,
+    "MEDIUM": 29,
+    "HARD": 32,
+    "INTERMEDIATE": 99,
+    "WET": 99
+   },
+   "pass_restart": [
+    -0.3156,
+    0.8128,
+    -3.4211
+   ],
+   "pit_neutral": [
+    -3.7105,
+    1.0283,
+    0.5504,
+    1.6077,
+    2.46,
+    0.2074,
+    -2.1906
+   ],
+   "pit_neutral_sd": {
+    "sc": 2.23,
+    "vsc": 1.437
+   }
+  }
+ }
+}

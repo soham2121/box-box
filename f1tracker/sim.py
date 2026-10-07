@@ -3,31 +3,105 @@
 lap time = base[driver] + offset[compound] + deg[compound] * tyre_age + fuel_s_per_kg * fuel(lap) + noise
 Fuel and tyre age both grow linearly through a stint, so data can't separate them: fuel is a fixed knob, deg is fit.
 """
+import copy
+import json
 import sys
+from pathlib import Path
 
 import numpy as np
 from scipy.optimize import lsq_linear
 
 MODEL = {  # ponytail: hand-tuned defaults. Every value is a calibration knob (config.json "model" overrides them)
-    'fuel_start_kg': 75.0,    # 2026 fuel is energy-limited (3000 MJ/h); teams don't publish loads
+    'fuel_start_kg': 70.0,    # per season: SEASONS below
     'fuel_s_per_kg': 0.03,    # lap time cost per kg
-    'min_mass_kg': 768.0,     # 2026 minimum mass incl. driver, without fuel
+    'min_mass_kg': 768.0,     # per season: SEASONS below
     'pit_loss': 22.0,         # last resort when neither the circuit API, the session nor the circuit catalogue has a value
     'sc_pit_ratio': 0.634,    # SC / VSC pit loss as a share of the green one: MultiViewer's ratios, identical at all 32
     'vsc_pit_ratio': 0.723,   # circuits in its catalogue. Only used when MultiViewer has no entry for the circuit
     'neutral_lap_ratio': 1.15,  # a lap whose field median is this much slower than the session's is not green (SC starts,
                                 # red-flag restarts). Measured: drying-track green laps <= 1.10x, SC laps >= 1.16x
-    'sc_prob': 0.35,          # chance of a (V)SC per race, spread evenly over laps
+    'sc_per_race': 0.43,      # mean safety cars per race, spread evenly over laps (0.43 = a 35 % chance of at least one)
     'sc_laps': 4,
     'sc_lap_factor': 1.35,
-    'pass_threshold': 0.8,    # s/lap a car needs over the one ahead to get past in one lap
+    'vsc_per_race': 0.0,      # virtual safety cars: same idea, gaps frozen instead of bunched
+    'vsc_laps': 2,
+    'vsc_lap_factor': 1.3,
+    'pass_threshold': 0.8,    # s/lap a car needs over the one ahead to get past in one lap (when 'pass' is None)
+    'pass': None,             # [a, b, c]: P(a car within 1 s gets past in a lap) = sigmoid(a + b*pace edge + c*gap), calibrate.py
+    'pass_restart': None,     # same, for the laps after a restart while DRS / Overtake Mode is still off (calibrate.py)
+    'restart_laps': 1,        # racing laps after an SC / red-flag restart before DRS / Overtake Mode: per season (SEASONS)
+    'red_per_race': 0.0,      # red flags per race: free tyre change for everyone (it counts for the two-compound rule)
+    'pit_neutral': None,      # [w...]: P(a car pits on an SC/VSC lap), calibrate.py; None: worn tyres (40 % of life) stop
+    'pit_neutral_sd': None,   # {'sc', 'vsc'}: spread of a factor shared by all cars in one SC / VSC (all pit or all stay out)
     'min_gap': 0.4,
     'noise_min': 0.25,
     'prior_weight': 3.0, 'half_life_laps': 4, 'trend_stiffness': 300,      # pseudo-laps pulling compound params towards the prior
     'prior': {'SOFT': (-0.5, 0.10), 'MEDIUM': (0.0, 0.06), 'HARD': (0.4, 0.04),  # (offset vs MEDIUM s, deg s/lap)
               'INTERMEDIATE': (6.0, 0.05), 'WET': (10.0, 0.05)},
     'life': {'SOFT': 18, 'MEDIUM': 28, 'HARD': 40, 'INTERMEDIATE': 99, 'WET': 99},
+    'slick_wet_s': 6.0,       # s/lap slicks lose to inters on a wet track: median of 69 laps in the 5 mixed races of
+                              # 2025-26 (quartiles -1 / +16: it depends on how wet, a drying track favours slicks)
+    'two_compounds': True,    # Grand Prix rule; the sim panel and calibrate.py turn it off for sprints (free tyre choice)
 }
+DEFAULTS = copy.deepcopy(MODEL)  # before calibration: calibrate.py's baseline
+
+# Each regulation era is a different car (aero, tyres, power unit, overtaking aid), so everything fitted is per era
+ERAS = {'2018-2021': (2018, 2021),  # 2017-spec wide cars, DRS (the live timing archive starts in 2018)
+        '2022-2025': (2022, 2025),  # ground-effect cars, DRS
+        '2026-': (2026, 9999)}      # new power units, active aero, Overtake Mode instead of DRS
+# Regulation facts per season: minimum mass incl. driver without fuel (kg), typical race start fuel (kg). The fuel
+# limit was 105 kg in 2018 and 110 kg from 2019 (about 100 used); 2026 limits energy (3000 MJ/h), ~70 kg reported.
+SEASONS = {2018: (733, 105), 2019: (743, 100), 2020: (746, 100), 2021: (752, 100), 2022: (798, 100),
+           2023: (798, 100), 2024: (798, 100), 2025: (800, 100), 2026: (768, 70)}
+
+
+def era(year):
+    return next((k for k, (a, b) in ERAS.items() if a <= year <= b), '2026-')
+
+
+try:  # {era: knobs} fitted on that era's races by calibrate.py
+    CALIBRATION = json.loads(Path(__file__).with_name('calibration.json').read_text()).get('eras', {})
+except FileNotFoundError:
+    CALIBRATION = {}
+except (OSError, ValueError, AttributeError) as e:
+    print('calibration.json unreadable, using defaults:', e)
+    CALIBRATION = {}
+
+
+def season_model(year, overrides=None, calibrated=True):
+    """Knobs for a season: defaults < that season's regulation facts < its era's calibration < config overrides."""
+    mass, fuel = SEASONS.get(year, SEASONS[max(SEASONS)] if year > max(SEASONS) else SEASONS[min(SEASONS)])
+    cal = {k: v for k, v in CALIBRATION.get(era(year), {}).items() if k in DEFAULTS} if calibrated else {}
+    if 'prior' in cal:  # JSON lists back to (offset, deg) pairs
+        cal['prior'] = {c: tuple(v) for c, v in cal['prior'].items()}
+    restart = 2 if year <= 2023 else 1  # DRS after an SC restart: 2 racing laps until 2023, 1 from 2024; 2026 Overtake
+    # Mode: once every car has passed the detection point after the restart, so about 1 lap
+    return {**copy.deepcopy(DEFAULTS), 'min_mass_kg': float(mass), 'fuel_start_kg': float(fuel), 'restart_laps': restart,
+            **cal, **(overrides or {})}
+
+
+MODEL.update(season_model(max(SEASONS)))  # current era: the default wherever no session year is known
+
+
+SOFTNESS = ['HYPERSOFT', 'ULTRASOFT', 'SUPERSOFT', 'SOFT', 'MEDIUM', 'HARD', 'SUPERHARD']  # Pirelli 2018, softest first
+
+
+def relative_compounds(laps):
+    """{2018 name: SOFT/MEDIUM/HARD}. From 2019 the feed names the softest / middle / hardest of a race's three
+    compounds SOFT / MEDIUM / HARD; 2018 sent Pirelli's seven names, so a 2018 race is relabelled the same way to fit
+    one model. ponytail: a race that ran only two of its three maps them to SOFT / MEDIUM (the third is unknown)."""
+    seen = sorted({l['cmp'] for l in laps if l['cmp'] in SOFTNESS}, key=SOFTNESS.index)
+    if set(seen) <= {'SOFT', 'MEDIUM', 'HARD'}:
+        return {}
+    return dict(zip(seen, ('SOFT', 'MEDIUM', 'HARD') if len(seen) >= 3 else ('SOFT', 'MEDIUM') if len(seen) == 2 else ('MEDIUM',)))
+
+
+def relabel(rows, mapping):
+    """Laps or State.drivers() rows with compounds renamed by relative_compounds()."""
+    if not mapping:
+        return rows
+    return [{**r, 'cmp': mapping.get(r['cmp'], r['cmp']),
+             **({'used': {mapping.get(c, c) for c in r['used']}} if 'used' in r else {})} for r in rows]
 
 
 def fuel_kg(lap, total, m):
@@ -208,25 +282,73 @@ def pit_loss(laps=(), stops=None, known=None, weekend=None, typical=None, m=MODE
             'vsc': float(known.get('vsc') or normal * m['vsc_pit_ratio']), 'source': src, 'n': n}
 
 
-def gap_s(d, lap_s=95.0):
-    g = str(d['gap'])
-    if 'L' in g:  # '1 L' / 'LAP 12' (leader)
-        return 0.0 if g.startswith('LAP') else lap_s * float(g.split()[0])
+def lap_time(laps):
+    """A green lap at the front right now: the leader's median over their last 5 green laps (lapped cars' gaps
+    and the 'pit now' rejoin need it), or None before there are two."""
+    lead = [l['t'] for l in laps if l['pos'] == 1 and l['t'] and not l['pit'] and not l['sc'] and l['lap'] > 1][-5:]
+    return float(np.median(lead)) if len(lead) >= 2 else None
+
+
+def _num(s):
     try:
-        return float(g.lstrip('+') or 0)
+        return float(str(s).lstrip('+'))
     except ValueError:
-        return d['pos'] * 0.5
+        return None
 
 
-def simulate(drivers, lap, model, plan=None, runs=500, seed=0, pit_loss=None):
+def gaps(drivers, lap_s=None):
+    """{drv: seconds behind the leader}. A lapped car's gap reads '1L' / '6L', but its interval to the car ahead is
+    usually still in seconds, so it's the car ahead's gap plus that interval; whole laps of lap_s (95 s when unknown)
+    only when the interval is in laps too. Counting '1L' as exactly one lap put cars a lap+ down too close."""
+    out, prev = {}, None
+    for d in sorted(drivers, key=lambda d: d['pos']):
+        g = str(d['gap']).strip()
+        v = _num(g)
+        if v is None and prev is not None and g[:1].isdigit() and 'L' in g:
+            iv = _num(d.get('int', ''))
+            v = prev + iv if iv is not None else (lap_s or 95.0) * float(g.split('L')[0])
+        elif v is None:  # leader ('LAP 12' / ''), or no gap yet
+            v = 0.0 if prev is None else prev + 0.5
+        out[d['drv']] = prev = v
+    return out
+
+
+def track_now(drivers):
+    """'DRY' or 'WET' from what most running cars are on. The feed has no track-wetness value (WeatherData Rainfall
+    is only rain at the weather station), and the teams' tyre calls are the best read of the track."""
+    on = [d['cmp'] for d in drivers if not d['out']]
+    return 'WET' if sum(c in ('INTERMEDIATE', 'WET') for c in on) * 2 > len(on) else 'DRY'
+
+
+NEUTRAL = ('SC', 'VSC', 'RED')
+
+
+def pit_neutral_features(age_share, left_share, owes, ep_lap, vsc):
+    """Inputs of the 'pit_neutral' odds (calibrate.py fits them): tyre age as a share of its default life, share of the
+    race left, still owes the two-compound rule, first / second lap of the SC or VSC, and whether it's a VSC.
+    (The gap to the car behind vs the SC pit loss was tried too: no better on 2026's races.)"""
+    return [1.0, age_share, left_share, owes * 1.0, (ep_lap == 0) * 1.0, (ep_lap == 1) * 1.0, vsc * 1.0]
+
+
+def simulate(drivers, lap, model, plan=None, runs=500, seed=0, pit_loss=None, lap_s=None, conditions=None,
+             neutral_now=None, events=None):
     """Monte Carlo from the current running order to the flag.
     drivers: State.drivers() rows. plan: (drv, pit_lap, compound) forced for one driver.
+    lap_s: lap_time() of the session; the model's prediction when None.
+    conditions: track from here on, 'DRY' / 'WET', or {from lap: 'DRY' / 'WET'}; None holds track_now(). No weather
+    forecast is assumed. Cars on the wrong tyres for the track stop when the time they'd lose to the flag beats the
+    pit loss; slicks on a wet track run at inter pace + slick_wet_s.
+    neutral_now: ('SC' / 'VSC' / 'RED', laps it has left) if one is out now. events: {lap: 'SC' / 'VSC' / 'RED'}
+    forced on those laps (what-ifs); random ones keep coming at the calibrated rates too.
+    SC: nobody passes, stops cost the SC pit loss, and by the end of each SC lap the field has closed up. VSC: gaps freeze, stops cost the VSC pit loss.
+    Red flag: the field bunches, every car gets new tyres for free. After an SC or red flag, DRS / Overtake Mode is
+    off for restart_laps laps (passing odds 'pass_restart').
     Returns {'drv': [...], 'code': [...], 'pos': (runs, D) finishing positions}."""
     m, total, rng = model['m'], model['total'], np.random.default_rng(seed)
     ds = [d for d in drivers if not d['out']]
     D, R, cmps = len(ds), runs, list(m['prior'])
     loss = pit_loss or {'normal': m['pit_loss'], 'sc': m['pit_loss'] * 0.6}
-    lap_s = np.median([predict(model, d['drv'], lap, 'MEDIUM', 0) for d in ds])
+    lap_s = lap_s or np.median([predict(model, d['drv'], lap, 'MEDIUM', 0) for d in ds])
     ci = lambda c: cmps.index(c) if c in cmps else cmps.index('MEDIUM')
     base = np.array([_base(model, d['drv']) for d in ds])
     off = np.array([model['off'].get(c, 0) for c in cmps])
@@ -234,63 +356,138 @@ def simulate(drivers, lap, model, plan=None, runs=500, seed=0, pit_loss=None):
     life = np.array([m['life'].get(c, 30) for c in cmps])
     sig = np.array([model['sigma'].get(d['drv'], 0.5) for d in ds])
 
-    T = np.tile([gap_s(d, lap_s) for d in ds], (R, 1))
+    g = gaps(ds, lap_s)
+    T = np.tile([g[d['drv']] for d in ds], (R, 1))
     cmp = np.tile([ci(d['cmp']) for d in ds], (R, 1))
     age = np.tile([float(d['age']) for d in ds], (R, 1))
     used = np.zeros((R, D, len(cmps)), bool)
     for j, d in enumerate(ds):
         used[:, j, [ci(c) for c in d['used'] if c]] = True
         used[:, j, ci(d['cmp'])] = True
-    wet = cmp >= cmps.index('INTERMEDIATE')
+    dry, wets, inter = [ci(c) for c in ('SOFT', 'MEDIUM', 'HARD')], [ci('INTERMEDIATE'), ci('WET')], ci('INTERMEDIATE')
+    now = track_now(ds)
+    changes = sorted(conditions.items()) if isinstance(conditions, dict) else [(0, conditions or now)]
     pj = next((j for j, d in enumerate(ds) if plan and d['drv'] == plan[0]), None)
-    sc_left = np.zeros(R, int)
-    hazard = 1 - (1 - m['sc_prob']) ** (1 / max(total, 1))
+    sc_left, vsc_left, ep_lap = np.zeros(R, int), np.zeros(R, int), np.zeros(R, int)
+    restart_left, pitted_ep = np.zeros(R, int), np.zeros((R, D), bool)
+    sc_rate = -np.log(1 - m['sc_prob']) if 'sc_prob' in m else m['sc_per_race']  # older configs: chance of >= 1 SC
+    red_h, sc_h, vsc_h = (m['red_per_race'] / max(total, 1), sc_rate / max(total, 1), m['vsc_per_race'] / max(total, 1))
+    pw, pwr, pn = m.get('pass'), m.get('pass_restart') or m.get('pass'), m.get('pit_neutral')
+    pn_sd, herd = m.get('pit_neutral_sd') or {}, np.zeros(R)  # herd: this SC/VSC's shared pull towards stopping
+    life0 = np.array([DEFAULTS['life'].get(c, 30) for c in cmps])
+    forced = dict(events or {})
+    if neutral_now and neutral_now[0] in NEUTRAL:
+        forced.setdefault(lap + 1, neutral_now[0])
+    now_left = neutral_now[1] if neutral_now else None
+
+    def bunch(rows):  # end of an SC lap: everyone has caught the queue, at most ~0.8 s apart (cars that pitted rejoin
+        # at the back of their gap first: a stop as the SC comes out is the 'free' one)
+        order = np.argsort(T[rows], axis=1)
+        t = np.take_along_axis(T[rows], order, 1)
+        t = t[:, :1] + np.concatenate([np.zeros((len(t), 1)), np.cumsum(np.minimum(np.diff(t, axis=1), 0.8), 1)], 1)
+        sub = T[rows]
+        np.put_along_axis(sub, order, t, 1)
+        T[rows] = sub
 
     for L in range(lap + 1, total + 1):
         left = total - L
-        new_sc = (sc_left == 0) & (rng.random(R) < hazard) & (left > 3)
-        if new_sc.any():  # field bunches up behind the safety car
-            order = np.argsort(T[new_sc], axis=1)
-            ranks = np.argsort(order, axis=1)
-            T[new_sc] = np.take_along_axis(T[new_sc], order[:, :1], 1) + ranks * 0.8
-        sc_left[new_sc] = m['sc_laps']
-        sc = sc_left > 0
+        free, draw = (sc_left == 0) & (vsc_left == 0), rng.random(R)
+        new_red = free & (draw < red_h) & (left > 3)
+        new_sc = free & ~new_red & (draw < red_h + sc_h) & (left > 3)
+        new_vsc = free & ~new_red & ~new_sc & (draw < red_h + sc_h + vsc_h) & (left > 1)
+        if forced.get(L) in NEUTRAL and left >= 1:  # what-if (or out right now): every run gets it this lap
+            k = forced[L]
+            new_sc, new_vsc, new_red = (np.full(R, k == x) for x in NEUTRAL)
+            sc_left[:], vsc_left[:] = 0, 0
+        sc_left[new_sc] = max(1, now_left) if L == lap + 1 and now_left and neutral_now[0] == 'SC' else m['sc_laps']
+        sc_left[new_red] = 1  # restart (behind the SC or standing) the lap after the stoppage
+        vsc_left[new_vsc] = max(1, now_left) if L == lap + 1 and now_left and neutral_now[0] == 'VSC' else m['vsc_laps']
+        ep_lap = np.where(new_sc | new_vsc | new_red, 0, ep_lap + 1)
+        herd = np.where(new_sc, rng.normal(0, pn_sd.get('sc', 0.0), R), np.where(new_vsc, rng.normal(0, pn_sd.get('vsc', 0.0), R), herd))
+        pitted_ep[new_sc | new_vsc | new_red] = False
+        sc, vsc = sc_left > 0, vsc_left > 0
+        wet_track = ([c for k, c in changes if k <= L] or [now])[-1] == 'WET'
+        on_wet = np.isin(cmp, wets)
+        wrong = on_wet != wet_track
+        gain = (m['slick_wet_s'] + deg[cmp] * age if wet_track  # per lap, from switching to the right tyres
+                else off[cmp] + deg[cmp] * age - off[dry].min())
 
-        two = used.sum(2) >= 2
-        want = (age >= life[cmp]) & (left > 3) | (~two & (left <= 4)) | (sc[:, None] & (age > 0.4 * life[cmp]) & (left > 8))
-        want &= ~wet
-        if pj is not None:
-            want[:, pj] = L == plan[1]
-        choice = ci('SOFT') if left <= life[ci('SOFT')] else ci('MEDIUM') if left <= life[ci('MEDIUM')] else ci('HARD')
-        new_c = np.where(~two & (cmp == choice), np.where(cmp == ci('MEDIUM'), ci('HARD'), ci('MEDIUM')), choice)
-        if pj is not None:
+        # Grands Prix: two different dry compounds unless inters/wets were used; sprints: free choice
+        two = (not m['two_compounds']) | (used[:, :, dry].sum(2) >= 2) | used[:, :, wets].any(2)
+        want = (age >= life[cmp]) & (left > 3) | (~two & (left <= 4))
+        neutral = (sc | vsc)[:, None] & ~new_red[:, None]
+        if pn:  # who takes a cheap stop under the SC / VSC: odds fitted on that era's races
+            x = pit_neutral_features(age / life0[cmp], left / max(total, 1), ~two, ep_lap[:, None], vsc[:, None])
+            z = sum(w * np.asarray(f, float) for w, f in zip(pn, x)) + herd[:, None]
+            take = rng.random((R, D)) < 1 / (1 + np.exp(-np.clip(z, -30, 30)))
+        else:
+            take = (age > 0.4 * life[cmp]) & (left > 8)
+        want |= neutral & ~pitted_ep & take & (left > 1)
+        weather = wrong & ((left + 1) * gain > loss['normal'])
+        want |= weather
+        want &= ~new_red[:, None]  # red flag: tyres change for free below, nobody pays a stop
+        if pj is not None:  # the planned stop is that car's only one, bar a later stop for the right tyres
+            want[:, pj] = (L == plan[1]) | ((L > plan[1]) & weather[:, pj])
+        # each car takes the dry compound that's cheapest to the flag (an extra stop if it won't last), and a new one
+        # while it still owes the two-compound rule. ponytail: no set inventory (new vs used sets per compound)
+        n = left + 1
+        cost = n * off[dry] + deg[dry] * n * (n - 1) / 2 + (n > life[dry]) * loss['normal']
+        cost = np.where(~two[:, :, None] & used[:, :, dry], np.inf, cost)
+        new_c = np.full((R, D), inter) if wet_track else np.array(dry)[np.argmin(cost, axis=2)]
+        if pj is not None and L == plan[1]:
             new_c[:, pj] = ci(plan[2])
         cmp = np.where(want, new_c, cmp)
         age = np.where(want, 0, age + 1)
         used[want, cmp[want]] = True
+        pitted_ep |= want & (sc | vsc)[:, None]
+        if new_red.any():  # red flag: everyone may change tyres for free (and it counts for the two-compound rule)
+            fresh = new_red[:, None] & ~want
+            cmp = np.where(fresh, new_c, cmp)
+            age = np.where(fresh, 0, age)
+            used[fresh, cmp[fresh]] = True
 
-        lt = base + off[cmp] + deg[cmp] * age + model['trend'] * L + rng.standard_normal((R, D)) * sig
-        lt = np.where(sc[:, None], lap_s * m['sc_lap_factor'], lt)
-        lt += want * np.where(sc, loss.get('sc', loss['normal']), loss['normal'])[:, None]
+        pace = base + off[cmp] + deg[cmp] * age + model['trend'] * L
+        if wet_track:
+            pace = np.where(np.isin(cmp, wets), pace, base + off[inter] + deg[cmp] * age + model['trend'] * L + m['slick_wet_s'])
+        lt = pace + rng.standard_normal((R, D)) * sig
+        lt = np.where(sc[:, None], lap_s * m['sc_lap_factor'], np.where(vsc[:, None], lap_s * m['vsc_lap_factor'], lt))
+        lt += want * np.where(sc, loss.get('sc', loss['normal']),
+                              np.where(vsc, loss.get('vsc', loss['normal']), loss['normal']))[:, None]
 
-        order = np.argsort(T, axis=1)  # ponytail: one pass of "can't pass unless much faster", not a real traffic model
-        nt = np.take_along_axis(T + lt, order, 1)
+        order = np.argsort(T, axis=1)  # ponytail: one pass over adjacent pairs, no multi-car battles
+        t0, nt = np.take_along_axis(T, order, 1), np.take_along_axis(T + lt, order, 1)
         lts, pit = np.take_along_axis(lt, order, 1), np.take_along_axis(want, order, 1)
+        pc, calm = np.take_along_axis(pace, order, 1), ~(sc | vsc)
         for i in range(1, D):
-            held = (nt[:, i] < nt[:, i - 1] + m['min_gap']) & ~pit[:, i] & ~pit[:, i - 1] & \
-                   (sc | (lts[:, i - 1] - lts[:, i] < m['pass_threshold']))
+            racing = ~pit[:, i] & ~pit[:, i - 1]
+            if pw:  # within 1 s at the line (Overtake Mode / DRS range): gets past with the calibrated probability
+                g = t0[:, i] - t0[:, i - 1]
+                z = np.where(restart_left > 0, pwr[0] + pwr[1] * (pc[:, i - 1] - pc[:, i]) + pwr[2] * g,
+                             pw[0] + pw[1] * (pc[:, i - 1] - pc[:, i]) + pw[2] * g)
+                p = 1 / (1 + np.exp(-np.clip(z, -30, 30)))
+                passed = racing & calm & (g <= 1.0) & (rng.random(R) < p)
+                nt[:, i] = np.where(passed, np.minimum(nt[:, i], nt[:, i - 1] - m['min_gap']), nt[:, i])
+                held = racing & ~passed & (nt[:, i] < nt[:, i - 1] + m['min_gap'])
+            else:  # can't pass unless much faster
+                held = (nt[:, i] < nt[:, i - 1] + m['min_gap']) & racing & \
+                       (sc | (lts[:, i - 1] - lts[:, i] < m['pass_threshold']))
             nt[:, i] = np.where(held, nt[:, i - 1] + m['min_gap'], nt[:, i])
         np.put_along_axis(T, order, nt, 1)
-        sc_left = np.maximum(sc_left - 1, 0)
+        if sc.any():
+            bunch(sc)
+        restart_left = np.where(sc_left == 1, m['restart_laps'], np.maximum(restart_left - 1, 0))  # SC in this lap
+        sc_left, vsc_left = np.maximum(sc_left - 1, 0), np.maximum(vsc_left - 1, 0)
 
     return {'drv': [d['drv'] for d in ds], 'code': [d['code'] for d in ds],
             'pos': np.argsort(np.argsort(T, axis=1), axis=1) + 1}
 
 
-def rejoin(drivers, drv, loss):
-    """Where drv comes out if they pit now: (position, car ahead, gap ahead, car behind, gap behind)."""
-    lap_s = 95.0
-    g = {d['drv']: (gap_s(d, lap_s), d['code']) for d in drivers if not d['out']}
+def rejoin(drivers, drv, loss, lap_s=None):
+    """Where drv comes out if they pit now: (position, car ahead, gap ahead, car behind, gap behind).
+    lap_s: lap_time(), for lapped cars whose interval is in laps (see gaps())."""
+    ds = [d for d in drivers if not d['out']]
+    sec = gaps(ds, lap_s)
+    g = {d['drv']: (sec[d['drv']], d['code']) for d in ds}
     me = g[drv][0] + loss
     others = sorted((v, c) for k, (v, c) in g.items() if k != drv)
     ahead = [o for o in others if o[0] <= me]
@@ -299,20 +496,22 @@ def rejoin(drivers, drv, loss):
             behind[0][1] if behind else None, behind[0][0] - me if behind else None)
 
 
-def what_if(drivers, lap, model, drv, pit_lap, compound, runs=400, pit_loss=None):
+def what_if(drivers, lap, model, drv, pit_lap, compound, runs=400, pit_loss=None, lap_s=None, conditions=None,
+            neutral_now=None, events=None):
     """Same random numbers for both runs, so the difference is the strategy, not the dice."""
-    a = simulate(drivers, lap, model, None, runs, 1, pit_loss)
-    b = simulate(drivers, lap, model, (drv, pit_lap, compound), runs, 1, pit_loss)
+    a = simulate(drivers, lap, model, None, runs, 1, pit_loss, lap_s, conditions, neutral_now, events)
+    b = simulate(drivers, lap, model, (drv, pit_lap, compound), runs, 1, pit_loss, lap_s, conditions, neutral_now, events)
     j = a['drv'].index(drv)
     return {'base': a['pos'][:, j], 'plan': b['pos'][:, j]}
 
 
-def best_window(drivers, lap, model, drv, runs=150, pit_loss=None, compounds=('MEDIUM', 'HARD', 'SOFT')):
+def best_window(drivers, lap, model, drv, runs=150, pit_loss=None, compounds=('MEDIUM', 'HARD', 'SOFT'), lap_s=None,
+                conditions=None, neutral_now=None, events=None):
     """Mean finishing position for every (pit lap, compound) in the next 25 laps; best first."""
     out = []
     for c in compounds:
         for L in range(lap + 1, min(lap + 26, model['total'] - 1)):
-            r = simulate(drivers, lap, model, (drv, L, c), runs, 1, pit_loss)
+            r = simulate(drivers, lap, model, (drv, L, c), runs, 1, pit_loss, lap_s, conditions, neutral_now, events)
             out.append((float(r['pos'][:, r['drv'].index(drv)].mean()), L, c))
     return sorted(out)
 
@@ -325,7 +524,8 @@ def snapshot(laps, lap):
         if mine and mine[-1]['lap'] == lap:
             last = mine[-1]
             rows.append({'drv': drv, 'code': drv, 'pos': last['pos'], 'out': False, 'cmp': last['cmp'], 'age': last['age'],
-                         'gap': f"+{last['gap']}" if last['gap'] is not None else ('' if last['pos'] == 1 else '1 L'),
+                         'gap': f"+{last['gap']}" if last['gap'] is not None else ('' if last['pos'] == 1 else '1L'),
+                         'int': f"+{last['int']}" if last['int'] is not None else '',
                          'used': {l['cmp'] for l in mine if l['lap'] > 1}})
     return sorted(rows, key=lambda d: d['pos'])
 
@@ -353,7 +553,8 @@ def backtest(path, fit_to=20):
     for l in laps:
         prev, out = by.get((l['drv'], l['lap'] - 1)), by.get((l['drv'], l['lap'] + 1))
         if l['pit'] and l['lap'] > 2 and prev and out and not (l['sc'] or prev['sc'] or out['sc']) and not prev['pit']:
-            pred = rejoin(snapshot(laps, l['lap'] - 1), l['drv'], loss['normal'])[0]
+            pred = rejoin(snapshot(laps, l['lap'] - 1), l['drv'], loss['normal'],
+                          lap_time([o for o in laps if o['lap'] < l['lap']]))[0]
             rj.append(abs(pred - out['pos']))
 
     # 3) Monte Carlo from lap `fit_to` vs the real finishing order

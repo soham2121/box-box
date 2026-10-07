@@ -6,8 +6,8 @@ from datetime import datetime, timezone
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QComboBox, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QSizeGrip,
-                               QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+                               QSizeGrip, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
 from . import data, live, sim
 
@@ -187,18 +187,47 @@ class Widget(QWidget):
 # ---- static widgets ------------------------------------------------------------------------------------------------
 
 def session_kind(si):
-    """'Race' / 'Sprint' for the points-paying sessions, else None. Sprint Qualifying is Type 'Qualifying'."""
+    """'Race' / 'Sprint' for the points-paying sessions, else None. Sprint Qualifying / Shootout (2023+) are Type
+    'Qualifying'; 2021's sprint was called 'Sprint Qualifying' but is Type 'Race'."""
     if si.get('Type') != 'Race':
         return None
-    return 'Sprint' if si.get('Name') == 'Sprint' else 'Race'
+    return 'Sprint' if 'Sprint' in si.get('Name', '') else 'Race'
+
+
+def points_gain(st, kind, year):
+    """{driver code: points} if the session finished in the current order. Race top 10 25..1, plus 1 for the fastest
+    lap if it's in the top 10 (2019-2024 only); sprint 3-2-1 in 2021, top 8 8..1 from 2022."""
+    table = ([3, 2, 1] if year == 2021 else [8, 7, 6, 5, 4, 3, 2, 1]) if kind == 'Sprint' else POINTS['Race']
+    rows = [d for d in st.drivers() if d['pos'] < 99]
+    gain = {d['code']: table[d['pos'] - 1] for d in rows if d['pos'] <= len(table)}
+    best = min((d for d in rows if live.secs(d['best'])), key=lambda d: live.secs(d['best']), default=None)
+    if kind == 'Race' and 2019 <= year <= 2024 and best and best['pos'] <= 10:
+        gain[best['code']] += 1
+    return gain
+
+
+BASES = {}  # replayed session path -> data.standings_before() result, None while it loads
+
+
+def replay_base(st, kind):
+    """Standings before the replayed session, loaded once in the background (None until then / if unknown)."""
+    path = st.d.get('SessionInfo', {}).get('Path', '')
+    if not path[:4].isdigit():
+        return None
+    if path not in BASES:
+        BASES[path] = None
+        bg(lambda: data.standings_before(int(path[:4]), path.split('/')[1][:10], kind == 'Race'),
+           lambda r: BASES.__setitem__(path, r))
+    return BASES[path]
 
 
 def projection(app):
-    """Standings if the live race/sprint finished now: {'drivers': [...], 'teams': [...]} rows with 'points' and
-    'delta', or None. F1's ChampionshipPrediction feed when it flows; otherwise Jolpica standings plus the points table
-    for the running order, only while Jolpica doesn't have this session's results yet (else they'd count twice)."""
+    """Standings if the race/sprint finished now: {'drivers': [...], 'teams': [...]} rows with 'points' and 'delta',
+    or None. F1's ChampionshipPrediction feed when it flows (live, and replays from mid-2019). Otherwise the standings
+    before this session plus the points table for the running order. Live, that's only while Jolpica doesn't have this
+    session's results yet (else they'd count twice); replays use the standings as they were before the session."""
     st = app.state
-    if not st or not isinstance(st.feed, live.LiveFeed):
+    if not st or not isinstance(st.feed, (live.LiveFeed, live.ReplayFeed)):
         return None
     kind = session_kind(st.d.get('SessionInfo', {}))
     if not kind:
@@ -206,18 +235,35 @@ def projection(app):
     pred = st.prediction()
     if pred:
         return pred
-    drivers, teams, counted = (app.static.get(k) for k in ('drivers', 'teams', 'counted'))
-    if (not isinstance(counted, dict) or counted.get(kind) or not isinstance(drivers, list)
-            or st.session()['status'] not in ('Started', 'Finished', 'Finalised', 'Ends')):
+    if st.session()['status'] not in ('Started', 'Finished', 'Finalised', 'Ends'):
         return None
-    gain = {d['code']: POINTS[kind][d['pos'] - 1] for d in st.drivers() if d['pos'] <= len(POINTS[kind])}
-    rows = [{**d, 'points': d['points'] + gain.get(d['code'], 0), 'delta': gain.get(d['code'], 0)} for d in drivers]
-    team_gain = {}
+    if isinstance(st.feed, live.ReplayFeed):
+        base = replay_base(st, kind)
+        if not isinstance(base, dict):
+            return None
+        drivers, teams = base['drivers'], base['teams']
+    else:
+        drivers, teams, counted = (app.static.get(k) for k in ('drivers', 'teams', 'counted'))
+        if not isinstance(counted, dict) or counted.get(kind) or not isinstance(drivers, list):
+            return None
+        teams = teams if isinstance(teams, list) else []
+    gain = points_gain(st, kind, st.season() or datetime.now(timezone.utc).year)
+    now = {d['code']: d for d in st.drivers()}  # the session's own team colours (Jolpica's ids don't cover past teams)
+    known = {d['code'] for d in drivers}
+    rows = [{**d, 'colour': now[d['code']]['colour'] if d['code'] in now else d['colour']} for d in drivers] + \
+           [{'code': c, 'team': '', 'colour': d['colour'], 'points': 0.0} for c, d in now.items() if c not in known and c in gain]
+    rows = [{**d, 'points': d['points'] + gain.get(d['code'], 0), 'delta': gain.get(d['code'], 0)} for d in rows]
+    team_gain, team_colour = {}, {}
     for d in rows:
         team_gain[d['team']] = team_gain.get(d['team'], 0) + d['delta']
-    trows = [{**t, 'points': t['points'] + team_gain.get(t['name'], 0), 'delta': team_gain.get(t['name'], 0)}
-             for t in (teams if isinstance(teams, list) else [])]
+        team_colour.setdefault(d['team'], d['colour'])
+    trows = [{**t, 'colour': team_colour.get(t['name'], t['colour']), 'points': t['points'] + team_gain.get(t['name'], 0),
+              'delta': team_gain.get(t['name'], 0)} for t in teams]
     return {'drivers': sorted(rows, key=lambda d: -d['points']), 'teams': sorted(trows, key=lambda t: -t['points'])}
+
+
+def projection_label(app):
+    return 'LIVE PROJECTION' if isinstance(app.state.feed, live.LiveFeed) else f"PROJECTION AS OF {app.state.season()} REPLAY"
 
 
 def pts(row):
@@ -233,7 +279,7 @@ class DriverStandings(Widget):
         if isinstance(rows, Exception) or rows is None:
             self.body.setText(f'<i>{rows or "loading…"}</i>')
             return
-        self.head.setText(self.title + (' · LIVE PROJECTION' if proj else ''))
+        self.head.setText(self.title + (f' · {projection_label(self.app)}' if proj else ''))
         self.body.setText(table(
             [i, f"#{d['colour']}", f"<b>{d['code']}</b>", f"<span style='color:#999'>{d['team']}</span>", pts(d)]
             for i, d in enumerate(rows[:self.cfg['n']], 1)))
@@ -250,7 +296,7 @@ class ConstructorStandings(Widget):
         if isinstance(rows, Exception) or rows is None:
             self.body.setText(f'<i>{rows or "loading…"}</i>')
             return
-        self.head.setText(self.title + (' · LIVE PROJECTION' if proj and proj['teams'] else ''))
+        self.head.setText(self.title + (f' · {projection_label(self.app)}' if proj and proj['teams'] else ''))
         self.body.setText(table([i, f"#{d['colour']}", d['name'], pts(d)] for i, d in enumerate(rows[:self.cfg['n']], 1)))
 
     tick = refresh
@@ -403,6 +449,24 @@ class TrackMap(Widget):
                    f'wind {speed} m/s from {card}')
 
 
+def best_and_gap(ln, q):
+    """Best lap and gap to the fastest: for the current part in qualifying, else for the session."""
+    if q:
+        return ((seq_at(ln.get('BestLapTimes'), q['part'] - 1) or {}).get('Value', ''),
+                (seq_at(ln.get('Stats'), q['part'] - 1) or {}).get('TimeDiffToFastest', ''))
+    return (ln.get('BestLapTime') or {}).get('Value', ''), ln.get('TimeDiffToFastest', '')
+
+
+def pos_and_code(d, ln, q):
+    """(position, code, knocked out): position red in the drop zone, code greyed once out of the session."""
+    grey = "<span style='color:#777'>{}</span>".format
+    ko = ln.get('KnockedOut')
+    pos = d['pos'] if d['pos'] < 99 else ''
+    if q and q['safe'] and not ko and pos and pos > q['safe']:
+        pos = f"<span style='color:#ff4040'><b>{pos}</b></span>"  # knocked out if the part ended now
+    return pos, f"<b>{d['code']}</b>" if not (ko or d['out']) else grey(d['code']), ko
+
+
 class TimingTower(Widget):
     title = 'TIMING'
     size_hint = (330, 560)
@@ -411,14 +475,25 @@ class TimingTower(Widget):
         if _need_feed(self):
             return
         st, s = self.app.state, self.app.state.session()
-        self.head.setText(f"{s['name'] or 'TIMING'}" + (f" · L{s['lap']}/{s['total']}" if s['total'] else ''))
+        q, left = st.quali(), st.clock()
+        self.head.setText(f"{s['name'] or 'TIMING'}" + (f" · L{s['lap']}/{s['total']}" if s['total'] else '')
+                          + (f" · {q['label']}" if q else '') + (f' · {mmss(left)} left' if left and not s['total'] else ''))
         race = s['type'] in ('Race', 'Sprint')
         wide = self.docked and race  # the live dashboard has room for leader gap and best lap too
         grey = "<span style='color:#777'>{}</span>".format
+        lines = st.d.get('TimingData', {}).get('Lines', {})
         rows = [['', '', '', r(grey('INT')), r(grey('LEADER')), r(grey('LAST')), r(grey('BEST')), grey('TYRE'), grey('STOPS')]] if wide else []
         for d in st.drivers()[:self.cfg['n']]:
             letter, col = tyre_style(d['cmp'], st)
-            gap = (d['int'] if d['pos'] > 1 else d['laps'] and f"L{d['laps']}") if race else d['best']
+            if not race:  # practice / qualifying: best lap of the current part, drop zone, knocked-out cars greyed
+                pos, code, ko = pos_and_code(d, lines.get(d['drv'], {}), q)
+                best = best_and_gap(lines.get(d['drv'], {}), q)[0]
+                rows.append([grey(pos) if ko else pos, '#444444' if ko else f"#{d['colour']}", code, r(grey(best) if ko else best),
+                             r(f"<span style='color:#999'>{'' if ko else d['last']}</span>"),
+                             grey('out') if ko else f"<span style='color:{col}'><b>{letter}</b></span>{d['age']}",
+                             'PIT' if d['pit'] and not ko else ''])
+                continue
+            gap = d['int'] if d['pos'] > 1 else d['laps'] and f"L{d['laps']}"
             rows.append([d['pos'], f"#{d['colour']}", f"<b>{d['code']}</b>" if not d['out'] else f"<s>{d['code']}</s>",
                          r(gap or ''), *([r(grey(d['gap'] if d['pos'] > 1 else ''))] if wide else []),
                          r(f"<span style='color:#999'>{d['last']}</span>"), *([r(grey(d['best']))] if wide else []),
@@ -444,13 +519,42 @@ class SimPanel(Widget):
         pit.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Preferred)  # else it takes a share of the spare width
         for w, stretch in ((self.drv, 2), (pit, 0), (self.lap, 1), (self.cmp, 2)):
             row.addWidget(w, stretch)
+        # weather what-if: the sim holds today's track (what most cars are on) unless told it dries or rains
+        self.wx, self.wx_lap = QComboBox(), QSpinBox(minimum=1, maximum=99)
+        self.wx.addItems(['track stays as now', 'track dries from lap', 'rain (inters) from lap'])
+        self.wx.currentIndexChanged.connect(lambda i: self.wx_lap.setEnabled(i > 0))
+        self.wx_lap.setEnabled(False)
+        row_wx = QHBoxLayout()
+        row_wx.addWidget(self.wx, 4)
+        row_wx.addWidget(self.wx_lap, 1)
+        # neutralisation what-if: a safety car / VSC / red flag on lap N (an SC or VSC out right now is always used)
+        self.ev, self.ev_lap = QComboBox(), QSpinBox(minimum=1, maximum=99)
+        self.ev.addItems(['no extra SC / VSC', 'safety car on lap', 'VSC on lap', 'red flag on lap'])
+        self.ev.currentIndexChanged.connect(lambda i: self.ev_lap.setEnabled(i > 0))
+        self.ev_lap.setEnabled(False)
+        row_ev = QHBoxLayout()
+        row_ev.addWidget(self.ev, 4)
+        row_ev.addWidget(self.ev_lap, 1)
         row2 = QHBoxLayout()
         row2.addWidget(go)
         row2.addWidget(best)
         self.lay.insertLayout(1, row)
-        self.lay.insertLayout(2, row2)
+        self.lay.insertLayout(2, row_wx)
+        self.lay.insertLayout(3, row_ev)
+        self.lay.insertLayout(4, row2)
         self.out = QLabel(wordWrap=True, textFormat=Qt.RichText, alignment=Qt.AlignTop | Qt.AlignLeft)
-        self.lay.addWidget(self.out, 2)
+        scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)  # the result outgrows the panel's bottom
+        box = QWidget()  # a layout around the label, so the scroll area hears when the text (and its height) changes
+        inner = QVBoxLayout(box)
+        inner.setContentsMargins(0, 0, 0, 0)
+        inner.addWidget(self.out)
+        inner.addStretch()
+        scroll.setWidget(box)
+        scroll.setStyleSheet('QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }'
+                             ' QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }'
+                             ' QScrollBar::handle:vertical { background: #555; border-radius: 3px; min-height: 20px; }'
+                             ' QScrollBar::add-line, QScrollBar::sub-line { height: 0; }')
+        self.lay.addWidget(scroll, 2)
         self.setStyleSheet(self.styleSheet() + ' QComboBox, QSpinBox, QPushButton { font: 9pt "Segoe UI"; }')
         self.priors, self.busy = {}, False  # meeting path -> compound priors from that weekend's practice
 
@@ -469,8 +573,9 @@ class SimPanel(Widget):
             self.body.setText('<i>Strategy sim needs a race or sprint (lap count).</i>')
             return
         lap = s['lap'] or 1
-        self.lap.setMinimum(lap)
-        self.lap.setMaximum(max(lap, s['total'] - 1))
+        for w in (self.lap, self.wx_lap, self.ev_lap):
+            w.setMinimum(lap)
+            w.setMaximum(max(lap, s['total'] - 1))
         me, loss = self.selected(), self.loss()
         src = loss['source'] + (f", {loss['n']} stops" if loss['n'] else '')
         under = {'4': 'sc', '6': 'vsc', '7': 'vsc'}.get(str(st.d.get('TrackStatus', {}).get('Status')))
@@ -478,7 +583,7 @@ class SimPanel(Widget):
                f" · pit loss {loss['normal']:.1f}s ({src})" + (f", {loss[under]:.1f}s under {under.upper()}" if under else '')
                + f" · {len(st.laps)} laps logged")
         if me and len(ds) > 1:
-            pos, a, ga, b, gb = sim.rejoin(ds, me, loss[under or 'normal'])
+            pos, a, ga, b, gb = sim.rejoin(ds, me, loss[under or 'normal'], sim.lap_time(st.laps))
             txt += (f"<br>Pit <b>now</b> → rejoin <b>P{pos}</b>" + (f", {ga:.1f}s behind {a}" if a else '')
                     + (f", {gb:.1f}s ahead of {b}" if b else ''))
         self.body.setText(txt)
@@ -496,7 +601,18 @@ class SimPanel(Widget):
             return
         self.busy = True
         laps, ds, s, loss, m = list(st.laps), [d for d in st.drivers() if not d['out']], st.session(), self.loss(), self.app.model()
+        m = {**m, 'two_compounds': 'Sprint' not in s['name']}  # sprints have free tyre choice
+        names = sim.relative_compounds(laps)  # 2018: Pirelli's names -> SOFT/MEDIUM/HARD for the model
+        laps, ds = sim.relabel(laps, names), sim.relabel(ds, names)
         lap, pit_lap, cmp = s['lap'] or 1, self.lap.value(), self.cmp.currentText()
+        cond = {0: None, 1: {self.wx_lap.value(): 'DRY'}, 2: {self.wx_lap.value(): 'WET'}}[self.wx.currentIndex()]
+        events = {self.ev_lap.value(): sim.NEUTRAL[self.ev.currentIndex() - 1]} if self.ev.currentIndex() else None
+        now = st.neutral_now(m)
+        self.scenario = ', '.join(x for x in (
+            now and f"{now[0]} out now (~{now[1]} lap{'s' if now[1] > 1 else ''} left)",
+            events and f"{self.ev.currentText().replace(' on lap', '')} on lap {self.ev_lap.value()}",
+            cond and ('rain' if 'WET' in cond.values() else 'track dries') + f" from lap {self.wx_lap.value()}") if x)
+        wet = 'WET' in (cond or {}).values() or sim.track_now(ds) == 'WET'
         meeting = st.d.get('SessionInfo', {}).get('Path', '').rsplit('/', 2)[0]
         self.out.setText('<i>simulating…' + ('' if meeting in self.priors else ' (first run loads this weekend\'s practice data)') + '</i>')
 
@@ -507,11 +623,16 @@ class SimPanel(Widget):
                 fp_laps = [{**l, 'sess': i} for i, p in enumerate(fp) for l in live.laps_from_archive(p, track=False)[1]]
                 self.priors[meeting] = sim.priors_from(fp_laps, s['total'], m) if fp_laps else m['prior']
             model = sim.fit(laps, s['total'], {**m, 'prior': self.priors[meeting]})
+            kw = {'pit_loss': loss, 'lap_s': sim.lap_time(laps), 'conditions': cond, 'neutral_now': now, 'events': events}
             if window:
-                return 'window', sim.best_window(ds, lap, model, me, pit_loss=loss)
-            return 'whatif', (pit_lap, cmp, sim.what_if(ds, lap, model, me, pit_lap, cmp, pit_loss=loss))
+                return 'window', sim.best_window(ds, lap, model, me, **kw,
+                                                 compounds=('MEDIUM', 'HARD', 'SOFT') + (('INTERMEDIATE',) if wet else ()))
+            return 'whatif', (pit_lap, cmp, sim.what_if(ds, lap, model, me, pit_lap, cmp, **kw))
 
         bg(work, self.show_result)
+
+    def scenario_note(self):
+        return f"<br><span style='color:#e8c547'>with {self.scenario}</span>" if getattr(self, 'scenario', '') else ''
 
     def show_result(self, res):
         self.busy = False
@@ -520,7 +641,7 @@ class SimPanel(Widget):
             return
         kind, x = res
         if kind == 'window':
-            self.out.setText('<b>Best stop windows</b> (mean finish)' + table(
+            self.out.setText('<b>Best stop windows</b> (mean finish)' + self.scenario_note() + table(
                 [f'L{L}', f"<span style='color:{tyre_style(c, self.app.state)[1]}'>{c}</span>", r(f'P{mean:.2f}')] for mean, L, c in x[:8]))
             return
 
@@ -531,13 +652,14 @@ class SimPanel(Widget):
         pit_lap, cmp, x = x
         b, p = x['base'], x['plan']
         delta = b.mean() - p.mean()
-        self.out.setText(table([
+        self.out.setText(self.scenario_note() + table([
             ['', r('mean'), 'most likely finishes'],
             ['Current plan', r(f'P{b.mean():.2f}'), dist(b)],
             [f'Pit L{pit_lap} {cmp}', r(f'P{p.mean():.2f}'), dist(p)],
         ]) + f"<br><b style='color:{'#5f5' if delta > 0.05 else '#f66' if delta < -0.05 else '#ccc'}'>"
              f"{'gains' if delta >= 0 else 'loses'} {abs(delta):.2f} places on average</b>"
-             f"<br><span style='color:#777'>Model: fitted lap times, tyre deg, fuel burn, SC risk. Not modelled: ERS, tyre temps, team intent.</span>")
+             f"<br><span style='color:#777'>Model: fitted lap times, tyre deg, fuel burn, SC/VSC risk, overtaking odds "
+             f"(calibrated on this regulation era's races). Not modelled: ERS, tyre temps, team intent, weather forecasts.</span>")
 
 
 PURPLE, GREEN, YELLOW = '#b14cff', '#2ecc71', '#e8c547'
@@ -588,16 +710,8 @@ class SectorTower(Widget):
                  grey('TYRE'), r(grey('LAPS')), '']]
         for d in st.drivers():
             ln = lines.get(d['drv'], {})
-            if q:
-                best = (seq_at(ln.get('BestLapTimes'), q['part'] - 1) or {}).get('Value', '')
-                gap = (seq_at(ln.get('Stats'), q['part'] - 1) or {}).get('TimeDiffToFastest', '')
-            else:
-                best, gap = (ln.get('BestLapTime') or {}).get('Value', ''), ln.get('TimeDiffToFastest', '')
-            ko = ln.get('KnockedOut')
-            pos = d['pos'] if d['pos'] < 99 else ''
-            if q and q['safe'] and not ko and pos and pos > q['safe']:
-                pos = f"<span style='color:#ff4040'><b>{pos}</b></span>"  # knocked out if the part ended now
-            code = f"<b>{d['code']}</b>" if not (ko or d['out']) else grey(d['code'])
+            best, gap = best_and_gap(ln, q)
+            pos, code, ko = pos_and_code(d, ln, q)
             if ko:
                 rows.append([grey(pos), '#444444', code, r(grey(best)), '', '', '', '', '', '', '', grey('out')])
                 continue

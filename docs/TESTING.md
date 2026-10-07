@@ -109,7 +109,7 @@ Live projection only runs with a **live** session (replay projection is group 3,
 1. Open the dashboard a few minutes before FP1. When the session starts, the timing fills within seconds, and the map moves (estimated, or GPS if signed in).
 2. Sprint / race: the sim panel shows the pit loss source changing as stops happen (Singapore has circuit data: expect `27.6s (circuit data)`).
 3. Leave it running across a red flag or long gap: it should keep or regain the connection (it reconnects 15 s after a drop).
-4. After the session, send me `%APPDATA%1tracker\live.txt` (raw feed) so I can check which data arrived with F1 TV.
+4. After the session, send me `%APPDATA%\f1tracker\live.txt` (raw feed) so I can check which data arrived with F1 TV.
 
 ---
 
@@ -143,7 +143,7 @@ First quit the old copies: tray → Quit, and close the F1 live window.
 3. The extension sends you to account.formula1.com. Log in; it then shows "Login Successful!". Click **Connect FastF1**.
    - Expected: "Authentication successful!" in the browser, and `F1 TV: signed in ✓` in the dashboard.
    - Not expected any more: "Could not connect to the local FastF1 application".
-4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%1tracker\live.log` and a screenshot.
+4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\f1tracker\live.log` and a screenshot.
 5. Double-click **F1 Live** again: no second window opens; the open one comes to the front.
 
 ---
@@ -196,3 +196,25 @@ Close and reopen F1 Live first.
 4. 2022 lists every weekend (from FastF1's mirror). 2022 → Bahrain Grand Prix → Race plays with GPS.
 5. Tray → Replay a past session (and its `…without GPS` submenu) has the same year → weekend → session menus.
 6. `.venv\Scripts\python -m pytest -m integration -k replay_years` passes (network).
+
+## Group 2: strategy sim (added 2026-10-06)
+1. `.venv\Scripts\python -m pytest` passes (`tests/test_sim.py`: lapped gaps, two-compound rule GP vs sprint, wrong tyres in rain, pass odds, planned stop then rain).
+2. `.venv\Scripts\python -m f1tracker.calibrate 2026` (about a minute) ends with a `calibrated` line better than `default` on pos_err and logp. Without a year it fits all three eras (about an hour the first time).
+2b. Strategy sim on a 2019 replay (2019 → Italian Grand Prix → Race, lap 25): the mass line says about 796 kg (743 kg minimum + 53 kg of the 100 kg start fuel left), not a 2026 figure.
+3. `.venv\Scripts\python -m f1tracker.sim` still prints `backtest OK` (Azerbaijan).
+4. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, jump to lap 25. Strategy sim tab: under the pit row, pick **rain (inters) from lap** 30, then **Best window**: the list is INTERMEDIATE stops around laps 29–31. Back to **track stays as now**: dry compounds again.
+5. Same replay, a lapped car in the driver box: "Pit now → rejoin" shows a position (it used to fail once anyone was lapped).
+6. A sprint replay (2026 → Miami Grand Prix → Sprint): What if for a car that has only used one compound no longer forces a stop.
+
+## Group 3: replay projection, tray qualifying, estimated positions (added 2026-10-06)
+1. Tray → Replay a past session → 2018 → Abu Dhabi Grand Prix → Race, jump to the last lap. Driver standings header: `PROJECTION AS OF 2018 REPLAY`, HAM 408 (+25), VET 320; constructors Mercedes 655.
+2. Tray replay 2021 → British Grand Prix → Sprint Qualifying near the end: VER +3, HAM +2, BOT +1 (2021 sprint points).
+3. Tray replay 2026 → Bahrain Grand Prix → Qualifying, slider to about 3/5 (Q2): the timing tower header shows `Q2 · mm:ss left`, P11–16 red, six cars greyed `out`.
+4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `tray.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
+
+## SC / VSC / red flag in the sim (added 2026-10-06)
+1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, lap 25. Strategy sim: third row **safety car on lap** 30, **Best window**: the result says `with safety car on lap 30`; the window ends at the SC (stops on laps 31–33, after the queue has formed, rank lower). Scroll the result if it's long.
+2. Same, **What if** (pit on lap 28): the result also starts with `with safety car on lap 30`.
+3. Jump into the lap-9 SC of that race (laps 9–12), What if: the result says `SC out now (~N laps left)`; after race control's "SAFETY CAR IN THIS LAP" it says ~1 lap.
+4. **red flag on lap** N: cars that owe a stop no longer have to pit later (free tyre change).
+5. `.venv\Scripts\python scripts\validate_pit_neutral.py` (about half an hour) prints, per era, the worn rule vs the fitted odds vs + shared factor on seasons the fit never saw; the shared factor's "spread ratio" is near 1.

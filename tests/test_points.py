@@ -93,3 +93,33 @@ def test_round_counted(monkeypatch):
 @pytest.mark.integration
 def test_jolpica_round_counted_live():
     assert data.round_counted(12, 2026) == {'Race': True, 'Sprint': True}  # Dutch GP 2026 was a sprint weekend
+
+
+def replay_app(year, name='Race', best=None):
+    """A replay of a `year` session, standings before it already loaded (widgets.BASES)."""
+    from f1tracker import widgets
+    st = live.State()
+    live.ReplayFeed(st, 'x/')  # registers itself as st.feed; never started
+    path = f'{year}/{year}-07-18_British_Grand_Prix/{year}-07-18_Race/'
+    st.apply('SessionInfo', {'Type': 'Race', 'Name': name, 'Path': path, 'StartDate': f'{year}-07-18T14:00:00'}, 0)
+    st.apply('SessionStatus', {'Status': 'Started'}, 0)
+    st.apply('DriverList', DRIVER_LIST, 0)
+    lines = {'1': {'Position': '1'}, '12': {'Position': '2'}, '63': {'Position': '11'}}
+    for n, t in (best or {}).items():
+        lines[n]['BestLapTime'] = {'Value': t}
+    st.apply('TimingData', {'Lines': lines}, 0)
+    widgets.BASES[path] = {'drivers': [dict(d) for d in DRIVERS], 'teams': [dict(t) for t in TEAMS], 'round': 10}
+    return SimpleNamespace(state=st, static={})
+
+
+def test_replay_projection_uses_that_seasons_rules():
+    # 2019-2024: +1 for the fastest lap if it's in the top 10
+    p = projection(replay_app(2021, best={'1': '1:30.000', '12': '1:31.000'}))
+    assert {d['code']: d['delta'] for d in p['drivers']} == {'VER': 26, 'ANT': 18, 'RUS': 0}
+    p = projection(replay_app(2021, best={'63': '1:29.000', '1': '1:30.000'}))  # fastest lap by P11: no point
+    assert {d['code']: d['delta'] for d in p['drivers']} == {'VER': 25, 'ANT': 18, 'RUS': 0}
+    p = projection(replay_app(2025, best={'1': '1:30.000'}))  # dropped from 2025
+    assert {d['code']: d['delta'] for d in p['drivers']}['VER'] == 25
+    # 2021's sprint ("Sprint Qualifying", Type Race) paid 3-2-1
+    p = projection(replay_app(2021, name='Sprint Qualifying'))
+    assert {d['code']: d['delta'] for d in p['drivers']} == {'VER': 3, 'ANT': 2, 'RUS': 0}

@@ -50,23 +50,55 @@ def fetch(url, max_age=None, raw=False):
     return b if raw else json.loads(b)
 
 
-def _standings(kind):
-    lists = fetch(f'{JOLPICA}/current/{kind}.json?limit=100', 1800)['MRData']['StandingsTable']['StandingsLists']
+def _standings(kind, at='current', max_age=1800):
+    lists = fetch(f'{JOLPICA}/{at}/{kind}.json?limit=100', max_age)['MRData']['StandingsTable']['StandingsLists']
     return lists[0][kind[0].upper() + kind[1:]] if lists else []
 
 
-def driver_standings():
-    return [{'pos': i, 'code': s['Driver'].get('code') or s['Driver']['familyName'][:3].upper(),
-             'name': f"{s['Driver']['givenName']} {s['Driver']['familyName']}",
+def _code(drv):
+    return drv.get('code') or drv['familyName'][:3].upper()
+
+
+def driver_standings(at='current', max_age=1800):
+    """at: 'current', or 'YEAR/ROUND' for the table after that round."""
+    return [{'pos': i, 'code': _code(s['Driver']), 'name': f"{s['Driver']['givenName']} {s['Driver']['familyName']}",
              'team': s['Constructors'][-1]['name'], 'colour': TEAM_COLOURS.get(s['Constructors'][-1]['constructorId'], '888888'),
              'points': float(s['points']), 'wins': int(s['wins'])}
-            for i, s in enumerate(_standings('driverStandings'), 1)]
+            for i, s in enumerate(_standings('driverStandings', at, max_age), 1)]
 
 
-def constructor_standings():
+def constructor_standings(at='current', max_age=1800):
     return [{'pos': i, 'name': s['Constructor']['name'], 'colour': TEAM_COLOURS.get(s['Constructor']['constructorId'], '888888'),
              'points': float(s['points']), 'wins': int(s['wins'])}
-            for i, s in enumerate(_standings('constructorStandings'), 1)]
+            for i, s in enumerate(_standings('constructorStandings', at, max_age), 1)]
+
+
+def standings_before(year, race_date, grand_prix):
+    """Both tables as they stood before one points session of a past weekend (replay projection): after the previous
+    round, plus the weekend's sprint when the session is its Grand Prix. race_date: the weekend's race day
+    'YYYY-MM-DD' (the archive folder's date). None when Jolpica doesn't know the weekend."""
+    age = None if year < datetime.now(timezone.utc).year else 1800  # finished seasons never change
+    races = fetch(f'{JOLPICA}/{year}.json?limit=100', age)['MRData']['RaceTable']['Races']
+    rnd = next((int(r['round']) for r in races if r['date'] == race_date), None)
+    if rnd is None:
+        return None
+    drivers = driver_standings(f'{year}/{rnd - 1}', age) if rnd > 1 else []
+    teams = constructor_standings(f'{year}/{rnd - 1}', age) if rnd > 1 else []
+    sprint = fetch(f'{JOLPICA}/{year}/{rnd}/sprint.json?limit=100', age)['MRData']['RaceTable']['Races'] if grand_prix else []
+    for res in (sprint[0].get('SprintResults', []) if sprint else []):
+        p, code, team = float(res['points']), _code(res['Driver']), res['Constructor']['name']
+        d = next((d for d in drivers if d['code'] == code), None)
+        if not d:
+            drivers.append(d := {'code': code, 'name': f"{res['Driver']['givenName']} {res['Driver']['familyName']}",
+                                 'team': team, 'colour': TEAM_COLOURS.get(res['Constructor']['constructorId'], '888888'),
+                                 'points': 0.0, 'wins': 0})
+        t = next((t for t in teams if t['name'] == team), None)
+        if not t:
+            teams.append(t := {'name': team, 'colour': d['colour'], 'points': 0.0, 'wins': 0})
+        d['points'] += p
+        t['points'] += p
+    return {'drivers': sorted(drivers, key=lambda d: -d['points']), 'teams': sorted(teams, key=lambda t: -t['points']),
+            'round': rnd}
 
 
 SESSION_KEYS = [('FirstPractice', 'FP1'), ('SecondPractice', 'FP2'), ('ThirdPractice', 'FP3'),
@@ -124,6 +156,12 @@ def past_sessions(year=None, n=15):
             if end < datetime.now(timezone.utc) - timedelta(minutes=30):
                 out.append((f"{year} {m['Name']} - {s['Name']}", s['Path']))
     return out[::-1][:n]
+
+
+def circuit_sessions(year, circuit_key):
+    """Archive paths of that season's sessions at one circuit (Index.json meeting Circuit.Key), in order."""
+    return [s['Path'] for m in fetch(f'{ARCHIVE}{year}/Index.json', 600)['Meetings']
+            if (m.get('Circuit') or {}).get('Key') == circuit_key for s in m['Sessions'] if s.get('Path')]
 
 
 FIRST_ARCHIVE_YEAR = 2018  # nothing earlier on F1's archive or FastF1's mirror

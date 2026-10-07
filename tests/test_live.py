@@ -83,3 +83,33 @@ def test_tyre_colours_follow_the_season():
     st.apply('SessionInfo', {'StartDate': '2019-03-17T16:10:00'}, 0)
     assert tyre_style('SOFT', st)[1] == '#ff3333' and tyre_style('MEDIUM', st)[1] == '#ffd400'
     assert tyre_style('ULTRASOFT', st)[0] == '?'
+
+
+def test_learned_timing_points_per_sector():
+    tr = live.Track({'x': [0, 100, 100, 0], 'y': [0, 0, 100, 100]})
+    assert list(tr.bounds([2, 2])) == [0.25, 0.5, 0.75, 1.0]  # nothing learned: equal lengths
+    tr.learned = {'sectors': [[0.1, 0.3], [0.6, 1.0]], 'profile': None}
+    assert list(tr.bounds([2, 2])) == [0.1, 0.3, 0.6, 1.0]
+    # another count in sector 2 (Baku 2026: 8/10/8 in qualifying, 8/10/9 in the race): spread between its learned ends
+    assert [round(b, 3) for b in tr.bounds([2, 3])] == [0.1, 0.3, 0.533, 0.767, 1.0]
+    assert tr.advance(0.2, 0.1) == 0.2 + 0.1  # constant speed without a profile
+    tr.learned['profile'] = [0.0, 0.25, 1.0]  # first half of the lap time covers a quarter of the distance
+    assert tr.advance(0.0, 0.5) == 0.25 and tr.advance(0.25, 0.25) == 0.625
+
+
+def test_safety_car_out_now_for_the_sim():
+    st = live.State()
+    m = {'sc_laps': 4, 'vsc_laps': 2}
+    st.apply('LapCount', {'CurrentLap': 10}, 0)
+    assert st.neutral_now(m) is None
+    st.apply('TrackStatus', {'Status': '4', 'Message': 'SCDeployed'}, 1)
+    st.apply('LapCount', {'CurrentLap': 11}, 2)
+    assert st.neutral_now(m) == ('SC', 3)  # typical 4 laps, 1 run
+    st.apply('RaceControlMessages', {'Messages': {'226': {'Category': 'SafetyCar', 'Status': 'IN THIS LAP'}}}, 3)
+    assert st.neutral_now(m) == ('SC', 1)
+    st.apply('TrackStatus', {'Status': '1', 'Message': 'AllClear'}, 4)
+    assert st.neutral_now(m) is None
+    st.apply('TrackStatus', {'Status': '6', 'Message': 'VSCDeployed'}, 5)
+    assert st.neutral_now(m) == ('VSC', 2)
+    st.apply('TrackStatus', {'Status': '7', 'Message': 'VSCEnding'}, 6)
+    assert st.neutral_now(m) is None
