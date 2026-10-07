@@ -40,7 +40,13 @@ Open **F1 Live** ~5 min before the start.
 - [ ] Projection shows `+25`, `+18`, … and moves when positions change
 - [ ] When cars pit: the timing table shows PIT; sim panel's pit loss stays `27.6s (circuit data)`
 - [ ] Under SC/VSC (common in Singapore): map border yellow/orange, sim panel says `… under SC` / `under VSC`
-- [ ] What if / Best window run during the race
+- [ ] While an SC/VSC is out, What if / Best window results reflect it (cheap stops now, field closed up after)
+- [ ] What if / Best window run during the race; try "safety car on lap N" and check the scenario line above the result
+- [ ] Tray timing tower in qualifying (Sat 18:30): Q1/Q2/Q3 label, time left, drop zone red, knocked-out cars grey with no PIT
+
+## Also this weekend
+- Item 10 (automatic live-session detection) gets built and tested on these sessions.
+- After the race: refit the 2026 sim (`python -m f1tracker.calibrate 2026 --write`).
 
 ## After the weekend — send me
 - `%APPDATA%\f1tracker\live.txt`: raw live recording (shows whether pit-stop times arrive live with F1 TV)

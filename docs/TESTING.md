@@ -109,7 +109,7 @@ Live projection only runs with a **live** session (replay projection is group 3,
 1. Open the dashboard a few minutes before FP1. When the session starts, the timing fills within seconds, and the map moves (estimated, or GPS if signed in).
 2. Sprint / race: the sim panel shows the pit loss source changing as stops happen (Singapore has circuit data: expect `27.6s (circuit data)`).
 3. Leave it running across a red flag or long gap: it should keep or regain the connection (it reconnects 15 s after a drop).
-4. After the session, send me `%APPDATA%1tracker\live.txt` (raw feed) so I can check which data arrived with F1 TV.
+4. After the session, send me `%APPDATA%\f1tracker\live.txt` (raw feed) so I can check which data arrived with F1 TV.
 
 ---
 
@@ -143,7 +143,7 @@ First quit the old copies: tray → Quit, and close the F1 live window.
 3. The extension sends you to account.formula1.com. Log in; it then shows "Login Successful!". Click **Connect FastF1**.
    - Expected: "Authentication successful!" in the browser, and `F1 TV: signed in ✓` in the dashboard.
    - Not expected any more: "Could not connect to the local FastF1 application".
-4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%1tracker\live.log` and a screenshot.
+4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\f1tracker\live.log` and a screenshot.
 5. Double-click **F1 Live** again: no second window opens; the open one comes to the front.
 
 ---

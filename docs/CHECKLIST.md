@@ -52,7 +52,7 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 
 ## Fixed 2026-10-06: F1 TV sign-in from shortcuts
 - [x] Root cause of `Could not connect to the local FastF1 application`: started from a shortcut (pythonw.exe), `sys.stderr` is None. FastF1's login server logs every request to stderr, so it crashed before replying to the extension. Reproduced, then fixed (quiet handler)
-- [x] stdout/stderr go to `%APPDATA%1tracker	ray.log` / `live.log` under pythonw, so nothing else can crash the same way
+- [x] stdout/stderr go to `%APPDATA%\f1tracker\tray.log` / `live.log` under pythonw, so nothing else can crash the same way
 - [x] Login server waits 30 min (was 5), also listens on `::1` (the extension calls `localhost`), and a second click reuses the waiting server; clear failure reasons (timeout / no F1 TV subscription / token didn't verify)
 - [x] Single dashboard instance: a second launch brings the open window to the front
 
@@ -89,7 +89,7 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 - [x] Tests: clock, quali part / drop zone, estimated map with a stopped car
 
 ## Group 2 — Simulator
-Done 2026-10-06 on branch `sim-calibration`. Scored by `python -m f1tracker.calibrate` (leave-one-race-out over the 21 races and sprints of 2026, see README).
+Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pending). Scored by `python -m f1tracker.calibrate` (leave-one-race-out over the 21 races and sprints of 2026, see README).
 - [x] 5. Per-car tyre choice: cheapest dry compound to the flag (extra-stop penalty past its life), two-compound rule per car. **Sprints have free tyre choice** (verified: the rule only applies to Grands Prix); the sim used to force a stop in sprints. No set inventory (new vs used sets)
 - [x] 6. Wet / inters: `conditions` (DRY / WET, or from lap N), default holds what most cars are on. No forecast invented; the sim panel has "rain (inters) / track dries from lap N". Wrong tyres stop when the time lost to the flag beats the pit loss. `slick_wet_s` = 6.0 s, median of 69 laps in the 5 mixed races of 2025-26 (wide spread). Inters on a dry track: fitted offset (too few laps to measure). Full wets folded into WET (rare in races)
 - [x] 7. Lapped cars: gap = car ahead's gap + interval (seconds even when the gap reads "1L"); leader's median green lap only when the interval is in laps. Rejoin error 1.38 → 0.84 places over 303 stops. Fixed a crash: "6L" gaps raised ValueError in the old parser
@@ -112,7 +112,7 @@ Done 2026-10-06 on branch `sim-calibration`. Scored by `python -m f1tracker.cali
 - [x] Tests: SC now bunches + restart passing, SC-on-lap-N best window, red-flag free tyres, `State.neutral_now`
 
 ## Group 3 — Live / data
-- [ ] 10. Automatic live-session detection (tray toggle, default on)
+- [ ] 10. Automatic live-session detection (tray toggle, default on). Planned for the Singapore weekend (9–11 Oct 2026) so it can be tested on a real live session
 - [x] 11. Better estimated positions (2026-10-06). The circuit API has no `trackPositionTime`, so `live.learn_positions` learns from archived GPS: where each timing mini-sector ends (median GPS spot as cars complete it, per sector, so a sector with another loop count spreads evenly between learned ends) and a time→distance profile of a green lap. Source: that weekend's latest finished session, else the circuit's latest in the two seasons before; measured on the current outline; cached per source + outline. Used by live feeds and no-GPS replays, on a background thread. Median error vs GPS on 9 races of 2026: 7–18 m on 8 (was 90–320 m); Hungary 153→120 m (its race GPS/timing offset differs from qualifying). Suzuka's crossover handled (search near the car's last spot); two loops at one spot allowed. Bad fits (loops clearly out of order, e.g. another layout) are rejected → old estimate
 - [x] 12. Replay: older seasons (2026-10-06). Year → weekend → session menus in F1 Live and the tray, 2018 to now. Sessions come from the archive's Index.json plus FastF1's schedule for the sessions the index leaves out (2018 Australia, 2024 before Spain, 2023 Qatar after FP1), kept only if the archive has their TimingData. F1 refuses most of 2022 (403); archive requests fall back to FastF1's mirror (`livetiming-mirror.fastf1.dev`, as FastF1 does), which has it. 2018 tyres use Pirelli's 2018 names and colours (`TYRE_2018`). Each year loads once per run when its menu first opens
 - [x] 13. Qualifying: Q1/Q2/Q3, countdown, knockout zone, sprint quali: live dashboard (sector timing) and, 2026-10-06, the tray TimingTower too (best of the current part, drop zone red, knocked out greyed). Checked on the Bahrain 2026 qualifying replay in Q2
@@ -121,12 +121,12 @@ Done 2026-10-06 on branch `sim-calibration`. Scored by `python -m f1tracker.cali
 ## Group 4 — UX
 - [ ] 15. Settings dialog (validated, saved, applied without restart)
 - [x] 16. Desktop layer survives Win+D (done early on request, 2026-10-06). Rainmeter's method: every 250 ms, if the foreground window is the desktop (shell window, or WorkerW/Progman hosting SHELLDLL_DefView) the widgets go topmost, otherwise back to the bottom. Qt's WindowStaysOnBottomHint had to go: Qt forced those windows back to the bottom. Verified with Show desktop on this PC (Windows 11 build 26200)
-- [x] Single tray instance (on request): named mutex `Local1tracker-tray-<user>`; a second launch notifies the first over QLocalSocket and exits
+- [x] Single tray instance (on request): named mutex `Local\f1tracker-tray-<user>`; a second launch notifies the first over QLocalSocket and exits
 - [ ] 17. Logging with rotation
 - [ ] 15b. FastF1 auth isolated in one module, graceful failures
 
 ## Group 5 — Distribution
 - [ ] 18. `requirements.txt` with direct deps, FastF1 pinned
-- [ ] 19. Test suite expansion (cache, sim, replay)
+- [~] 19. Test suite expansion (cache, sim, replay). Sim (`tests/test_sim.py`) and replay tests added with Groups 2–3 (51 pass); cache tests still to do
 - [x] 20. Start with Windows: tray toggle, HKCU Run key, off by default (done early on request, 2026-10-06). `run.pyw` + `F1 Tracker.bat` launchers. Widget positions saved 1 s after each move/resize, not only on Quit
 - [ ] 21. PyInstaller build script

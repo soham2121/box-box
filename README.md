@@ -79,7 +79,7 @@ The map also shows:
 - **Wind compass** (top right): `N` turned with the map, plus an arrow pointing where the wind blows, and `wind 1.8 m/s from E`.
 - **Sign in to F1 TV…**: opens FastF1's login page. It needs the **FastF1 Companion** browser extension (Chrome/Edge/Brave/Firefox; the page links it). Log in at formula1.com, then click **Connect FastF1** on the page the extension opens. The app waits up to 30 min, then reconnects with your account (real GPS positions) and keeps the laps logged so far.
 
-The window remembers its size and splitter positions (`%APPDATA%1tracker\dashboard.json`). It runs separately from the tray widgets, so you can close the standings during a race. Only one dashboard runs at a time: launching it again brings the open window to the front.
+The window remembers its size and splitter positions (`%APPDATA%\f1tracker\dashboard.json`). It runs separately from the tray widgets, so you can close the standings during a race. Only one dashboard runs at a time: launching it again brings the open window to the front.
 
 What the live feed sends:
 

@@ -1,6 +1,6 @@
 # F1 Tracker — correctness fixes + feature plan
 
-**Status (2026-10-06):** Group 1 done, waiting for user testing. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-07):** Groups 1–2 done; Group 3 items 11–14 done, item 10 to be built and tested live on the Singapore weekend (9–11 Oct). Also done on request: SC / VSC / red flag in the sim, per-era calibration. Branch `sim-calibration` pushed, PR to `main` pending (the user merges). Next: Group 4, then Group 5. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.
@@ -18,6 +18,10 @@
 - **Neutral laps.** RCM free-text ("SAFETY CAR LIGHTS ON", "STANDING START") is fragile. The statistical slow-lap check (1.15x) catches the same laps, so no RCM parsing.
 - **Bahrain 2026 real pit loss is ~27 s, not ~22 s.** Its pit lane takes 27.6–29 s to drive through. The "about 22 s" in the original bug report was an assumption.
 - **Added: practice-prior fix (`priors_from`).** Found while validating the what-if: quali-sim laps paired with race runs gave 0.6 s/lap deg.
+- **2026-10-06, replays back to 2018.** The archive starts in 2018. F1 refuses most of 2022 (403), so archive requests fall back to FastF1's mirror.
+- **2026-10-06, sim calibrated per regulation era (2018–21, 2022–25, 2026–), user's call.** Each era is a different car, so one fit for all is wrong. Season facts (min mass, start fuel, restart DRS laps) are set per year on top.
+- **2026-10-06, SC out now from race control's structured fields.** The sim needs to know an SC is coming in, so `State.neutral` reads `Category: SafetyCar` + `Status: IN THIS LAP`, not free text. The slow-lap check above still finds neutral laps for pit loss.
+- **2026-10-07, fitted "who pits under SC/VSC" model kept (user's call).** Out of sample it loses 0.02–0.05 places of mean error to a worn-tyre rule but wins on log score, pit/no-pit calibration and the spread of stops per SC. The user prefers realistic distributions to a slightly better mean.
 
 ## Context
 The user's spec lists 20 items in 5 priority groups. Most urgent: the strategy sim gives nonsense at Bahrain 2026. Pit loss shows 105 s instead of about 22 s, so the panel says "rejoin P19" and "loses 12.98 places". Work runs group by group. After each group: update the docs, give a summary and a full manual test plan, then **stop and wait for the user**. **No git commits** (the user commits).
