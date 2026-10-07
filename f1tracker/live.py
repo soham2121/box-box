@@ -68,16 +68,37 @@ class Track:
         self.rotation = info.get('rotation', 0)
         self.pit_loss = {k: float(v) for k, v in (info.get('pitLoss') or {}).items()}
         self.corners = [(c['number'], c['trackPosition']['x'], c['trackPosition']['y']) for c in info.get('corners', [])]
+        self.learned = None  # {'sectors', 'profile'} from GPS at this circuit (learn_positions), for estimated positions
 
     def at(self, f):
         d = (f % 1) * self.s[-1]
         return np.interp(d, self.s, self.xy[:, 0]), np.interp(d, self.s, self.xy[:, 1])
 
-    def bounds(self, n):
-        """Lap fraction at the end of each of n timing mini-sectors."""
+    def bounds(self, counts):
+        """Lap fraction at the end of each timing mini-sector (counts: mini-sectors per sector). Learned from GPS at this
+        circuit, per sector: a session can have another mini-sector count in one sector (Baku 2026: 8/10/8 in
+        qualifying, 8/10/9 in the race), which then spreads evenly between that sector's learned ends. Else the circuit
+        API's mini-sector indexes, else equal lengths."""
+        n = sum(counts) or 1
+        secs = (self.learned or {}).get('sectors')
+        if secs and len(secs) == len(counts):
+            out, start = [], 0.0
+            for lb, c in zip(secs, counts):
+                out += lb if len(lb) == c else list(start + (lb[-1] - start) * np.arange(1, c + 1) / c)
+                start = lb[-1]
+            return np.array(out)
         if len(self.ms) == n:
             return self.s[self.ms] / self.s[-1]
-        return np.arange(1, n + 1) / n  # ponytail: assumes equal mini-sector lengths when the circuit API has no indexes
+        return np.arange(1, n + 1) / n  # ponytail: assumes equal mini-sector lengths when nothing better is known
+
+    def advance(self, f0, dt):
+        """Lap fraction after `dt` (share of a lap time) from f0. Uses the circuit's time->distance profile (slow corners
+        take more of the lap than their length) when learned, else constant speed."""
+        prof = (self.learned or {}).get('profile')
+        if not prof:
+            return f0 + dt
+        tau = np.linspace(0, 1, len(prof))
+        return float(np.interp(np.interp(f0, prof, tau) + dt, tau, prof, right=1.0))
 
 
 class State:
@@ -102,6 +123,7 @@ class State:
         self.pit_known = None  # pit loss from the circuit API {'normal', 'sc', 'vsc'}
         self.pit_weekend = None  # pit loss measured in an earlier race of this weekend (sprint)
         self.pit_typical = None  # median pit loss over the circuit catalogue
+        self.neutral = None    # [SC / VSC / RED, lap it began, ending] while one is out (the sim starts from it)
         self._pit = (None, None)
 
     def pump(self, budget=0.4):
@@ -153,6 +175,18 @@ class State:
         if topic == 'TrackStatus' and x.get('Status') in NEUTRALISED:
             for f in self.flags.values():
                 f['sc'] = True
+        if topic == 'TrackStatus' and 'Status' in x:
+            kind = {'4': 'SC', '5': 'RED', '6': 'VSC', '7': 'VSC'}.get(str(x['Status']))
+            if not kind:
+                self.neutral = None
+            elif not self.neutral or self.neutral[0] != kind:
+                self.neutral = [kind, self.session()['lap'], False]
+            if self.neutral and str(x['Status']) == '7':  # VSC ending: green within seconds
+                self.neutral[2] = True
+        if topic == 'RaceControlMessages' and self.neutral and self.neutral[0] == 'SC':
+            msgs = x.get('Messages') if isinstance(x, dict) else None
+            if any((mm or {}).get('Status') == 'IN THIS LAP' for mm in (msgs.values() if isinstance(msgs, dict) else msgs or [])):
+                self.neutral[2] = True
         if topic == 'TimingData':
             return self._timing(x, t)
         if topic == 'ExtrapolatedClock':
@@ -183,14 +217,14 @@ class State:
                 counts = [len(seq(s.get('Segments'))) for s in seq(line.get('Sectors'))]
                 s, k = passed[n]
                 g = sum(counts[:s]) + k
-                b = self.track.bounds(sum(counts))
+                b = self.track.bounds(counts)
                 if g < len(b):
                     self.prog[n] = [b[g], t, b[g + 1] if g + 1 < len(b) else 1.0]
 
     def _cap(self, n, line, g):
         if not self.track:
             return 1.0
-        b = self.track.bounds(sum(len(seq(s.get('Segments'))) for s in seq(line.get('Sectors'))) or 1)
+        b = self.track.bounds([len(seq(s.get('Segments'))) for s in seq(line.get('Sectors'))])
         return b[g]
 
     def _lap(self, n, line):
@@ -248,7 +282,7 @@ class State:
             if gone(n):
                 continue
             lap_t = secs((ln.get('LastLapTime') or {}).get('Value')) or secs((ln.get('BestLapTime') or {}).get('Value')) or 100
-            f = f0 if ln.get('InPit') else min(f0 + (now - t0) / lap_t, cap)
+            f = f0 if ln.get('InPit') else min(self.track.advance(f0, (now - t0) / lap_t), cap)
             out.append((n, *self.track.at(f), bool(ln.get('InPit'))))
         return out, False
 
@@ -294,6 +328,24 @@ class State:
                  for k, e in (cp.get('Teams') or {}).items() if e]
         return {'drivers': sorted(drivers, key=lambda r: -r['points']), 'teams': sorted(teams, key=lambda r: -r['points'])}
 
+    def neutral_now(self, m):
+        """('SC' / 'VSC' / 'RED', laps it likely has left) for the sim, or None when green. An SC 'in this lap' has
+        one left, a VSC that's ending none; otherwise the era's typical length minus the laps already run."""
+        if not self.neutral:
+            return None
+        kind, since, ending = self.neutral
+        if kind == 'RED':
+            return ('RED', 1)
+        if ending:
+            return ('SC', 1) if kind == 'SC' else None
+        typical = m['sc_laps'] if kind == 'SC' else m['vsc_laps']
+        return (kind, max(1, round(typical) - (self.session()['lap'] - since)))
+
+    def season(self):
+        """Year of the session (SessionInfo StartDate), or None before it arrives."""
+        d = str(self.d.get('SessionInfo', {}).get('StartDate', ''))[:4]
+        return int(d) if d.isdigit() else None
+
     def clock(self):
         """Session time left in s, or None. F1 sends Remaining when the clock changes state; while Extrapolating it
         counts down from the moment the message arrived (its Utc matches the feed time, checked on archived quali)."""
@@ -326,9 +378,10 @@ class State:
                                 self.d.get('TrackStatus', {}).get('Message', '')), 'status': self.d.get('SessionStatus', {}).get('Status', '')}
 
 
-def load_track(state, si):
+def load_track(state, si, positions=False):
     """Outline + pit-loss sources for a SessionInfo payload (feed thread; network).
-    New circuits fall back to an archived lap trace."""
+    New circuits fall back to an archived lap trace. positions=True (feeds that may run without GPS) also learns
+    where this circuit's timing points are, on a background thread (see learn_positions)."""
     try:
         state.track = Track(data.circuit(si['Meeting']['Circuit']['Key'], int(si['StartDate'][:4])))
     except Exception as e:
@@ -344,6 +397,132 @@ def load_track(state, si):
         load_pit_loss(state, si)
     except Exception as e:  # sim falls back to the model default
         print('pit loss sources failed:', e)
+    if positions and state.track:
+        threading.Thread(target=attach_positions, args=(state, state.track, si), daemon=True).start()
+
+
+def attach_positions(state, track, si):
+    try:
+        src = position_source(si)
+        if src:
+            track.learned = learned_positions(src, track)
+            print('estimated positions calibrated on', src)  # path only: no credentials involved
+    except Exception as e:  # estimates fall back to equal mini-sectors
+        print('position calibration failed:', e)
+
+
+def position_source(si):
+    """The archived session to learn timing-point positions from: the latest finished one of this weekend, else this
+    circuit's latest one in the two seasons before (FP1 has nothing earlier at the same weekend)."""
+    meeting, year = si.get('Path', '').rsplit('/', 2)[0], int(si['StartDate'][:4])
+    done = [p for _, p in data.past_sessions(year, 999) if meeting and p.startswith(meeting) and p != si.get('Path')]
+    if done:
+        return done[0]
+    for y in (year - 1, year - 2):
+        try:
+            paths = data.circuit_sessions(y, si['Meeting']['Circuit']['Key'])
+        except Exception:
+            continue
+        if paths:
+            return paths[-1]
+    return None
+
+
+def learned_positions(path, track):
+    """learn_positions(path, track), cached on disk per source session and outline (archived sessions never change)."""
+    f = data.CACHE / f"positions_v5_{path.replace('/', '_')}_{len(track.xy)}_{int(track.s[-1])}.json"
+    if f.exists():
+        return json.loads(f.read_text())
+    r = learn_positions(path, track)
+    data.CACHE.mkdir(parents=True, exist_ok=True)
+    f.write_text(json.dumps(r))
+    return r
+
+
+def learn_positions(path, track):
+    """From an archived session with GPS: {'sectors': per sector, the lap fraction where each of its timing
+    mini-sectors ends (median GPS spot of cars as they complete it), 'profile': lap fraction reached at each 1 % of a
+    green lap's time}. Measured on `track`, the outline the estimates are drawn on (fractions of another outline would
+    not line up). With both, the no-GPS map was 18 m off the real car (median; 78 m p90) on the 2026 Bahrain race
+    learning from its qualifying, against 227 m (482 m) with equal mini-sectors and constant speed."""
+    st = State()
+    msgs = ReplayFeed(st, path).messages()
+    tr = track
+    pts, L = tr.xy[:-1], tr.s[-1]
+
+    def frac(x, y, prev):
+        """Lap fraction of the outline point nearest (x, y). Where the track crosses itself (Suzuka) the other branch
+        can be nearest, so only points within 8 % of a lap of the car's last spot count, when there is one."""
+        d = np.hypot(pts[:, 0] - x, pts[:, 1] - y)
+        if prev is not None:
+            d = np.where(np.abs((tr.s[:-1] / L - prev + 0.5) % 1 - 0.5) < 0.08, d, np.inf)
+            if not np.isfinite(d.min()):
+                d = np.hypot(pts[:, 0] - x, pts[:, 1] - y)
+        return tr.s[np.argmin(d)] / L
+    gps, events = {}, []  # car -> ([t], [lap fraction]);  (car, t, global mini-sector index)
+    for t, topic, x in msgs:
+        if topic == 'Position.z':
+            for n, e in unz(x)['Position'][-1]['Entries'].items():
+                if e['X'] or e['Y']:
+                    g = gps.setdefault(n, ([], []))
+                    g[0].append(t)
+                    g[1].append(frac(e['X'], e['Y'], g[1][-1] if g[1] and t - g[0][-1] < 5 else None))
+            continue
+        if topic == 'TimingData' and isinstance(x, dict):
+            for n, ln in (x.get('Lines') or {}).items():
+                for si_, sec in (ln.get('Sectors').items() if isinstance(ln.get('Sectors'), dict) else ()):
+                    segs = sec.get('Segments') if isinstance(sec, dict) else None
+                    for k, v in (segs.items() if isinstance(segs, dict) else ()):
+                        if isinstance(v, dict) and v.get('Status'):
+                            events.append((n, t, int(si_), int(k)))
+        st.apply(topic, x, t)
+    counts = next(([len(seq(sec.get('Segments'))) for sec in seq(ln.get('Sectors'))]
+                   for ln in st.d.get('TimingData', {}).get('Lines', {}).values() if seq(ln.get('Sectors'))), [])
+    G = sum(counts)
+
+    def at(n, t):  # the car's GPS lap fraction at feed time t (nearest sample within 1 s)
+        ts, fs = gps.get(n, ((), ()))
+        i = np.searchsorted(ts, t)
+        near = [j for j in (i - 1, i) if 0 <= j < len(ts) and abs(ts[j] - t) < 1]
+        return fs[min(near, key=lambda j: abs(ts[j] - t))] if near else None
+
+    def circular_median(v, ref):
+        d = (np.array(v) - ref + 0.5) % 1 - 0.5
+        return float((ref + np.median(d)) % 1)
+
+    spots = [[] for _ in range(G)]
+    for n, t, sec, k in events:
+        g = sum(counts[:sec]) + k
+        f = at(n, t)
+        if g < G and f is not None:
+            spots[g].append(f)
+    bounds = []
+    for g, v in enumerate(spots):
+        if len(v) < 5:
+            return {'sectors': None, 'profile': None}
+        bounds.append(1.0 if g == G - 1 else circular_median(v, np.angle(np.mean(np.exp(2j * np.pi * np.array(v)))) / (2 * np.pi) % 1))
+    ordered = all(b > a - 0.01 for a, b in zip(bounds, bounds[1:]))  # clearly out of order: don't trust it
+    for g in range(1, G):  # two loops at one spot (Suzuka has a pair at 0.985): keep them strictly in order
+        bounds[g] = min(max(bounds[g], bounds[g - 1] + 1e-4), 1.0)
+    sectors = [bounds[sum(counts[:i]):sum(counts[:i + 1])] for i in range(len(counts))] if ordered else None
+
+    green = [l for l in st.laps if l['t'] and not l['pit'] and not l['sc']]
+    med = np.median([l['t'] for l in green]) if green else 0
+    bins = [[] for _ in range(101)]
+    for l in green:
+        if l['t'] > med * 1.07 or l['drv'] not in gps:
+            continue
+        ts, fs = gps[l['drv']]
+        t0 = l['at'] - l['t']
+        i, j = np.searchsorted(ts, t0), np.searchsorted(ts, l['at'])
+        for a, f in zip(ts[i:j], fs[i:j]):
+            bins[int(round((a - t0) / l['t'] * 100))].append(f)
+    tau = np.linspace(0, 1, 101)
+    prof = np.array([circular_median(v, tau[i]) if v else np.nan for i, v in enumerate(bins)])
+    prof[0], prof[-1] = 0.0, 1.0
+    ok = ~np.isnan(prof)
+    prof = np.maximum.accumulate(np.clip(np.interp(tau, tau[ok], prof[ok]), 0, 1))
+    return {'sectors': sectors, 'profile': [round(float(v), 4) for v in prof], 'source': path}
 
 
 def load_pit_loss(state, si):
@@ -388,7 +567,8 @@ class ReplayFeed(threading.Thread):
     """Plays an archived session through the same State, starting just before the session goes green.
     Can pause (speed 0) and jump to any time or lap (seek / seek_lap)."""
     TOPICS = ['SessionInfo', 'DriverList', 'TimingAppData', 'TimingData', 'TrackStatus', 'LapCount', 'SessionStatus',
-              'RaceControlMessages', 'WeatherData', 'PitStopSeries', 'ExtrapolatedClock', 'Position.z']  # Position.z last
+              'RaceControlMessages', 'WeatherData', 'PitStopSeries', 'ExtrapolatedClock', 'ChampionshipPrediction',
+              'Position.z']  # Position.z last
 
     def __init__(self, state, path, speed=1.0, gps=True):
         super().__init__(daemon=True)
@@ -425,7 +605,7 @@ class ReplayFeed(threading.Thread):
         msgs = self.messages()
         si = next((x for t, topic, x in msgs if topic == 'SessionInfo'), None)
         if si:
-            load_track(self.state, si)
+            load_track(self.state, si, positions=not self.gps)
         self.begin = next((t for t, topic, x in msgs if topic == 'SessionStatus' and x.get('Status') == 'Started'), 0) - 30
         self.end = msgs[-1][0] if msgs else 0
         for t, topic, x in msgs:
@@ -470,7 +650,7 @@ class LiveFeed(threading.Thread):
 
     def push(self, topic, x):
         if topic == 'SessionInfo' and self.state.track is None and isinstance(x, dict) and 'Meeting' in x:
-            load_track(self.state, x)
+            load_track(self.state, x, positions=True)
         self.state.q.put((topic, x, time.time()))
 
     def run(self):

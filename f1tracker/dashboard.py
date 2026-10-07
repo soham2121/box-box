@@ -181,7 +181,9 @@ class Dashboard(QMainWindow):
         QTimer.singleShot(0, self.start_live)  # launched during a session: go straight to live
 
     def model(self):
-        return {**sim.MODEL, **self.cfg['model']}
+        """Sim knobs for the session's season (its regulation era's calibration), config overrides on top."""
+        year = self.state and self.state.season()
+        return sim.season_model(year or max(sim.SEASONS), self.cfg['model'])
 
     # ---- feeds -----------------------------------------------------------------------------------------------------
     def start_live(self, keep=False):

@@ -89,18 +89,34 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 - [x] Tests: clock, quali part / drop zone, estimated map with a stopped car
 
 ## Group 2 — Simulator
-- [ ] 5. Per-car tyre choice (known effect now: what-if overstates gains from switching compound, see TESTING.md)
-- [ ] 6. Wet / intermediate tyres and condition changes
-- [ ] 7. Lapped-car rejoin from session pace (no fixed 95 s)
-- [ ] 8. Overtaking model (pace, gap, dirty air, Overtake Mode, lapped traffic)
-- [ ] 9. Calibration across many races, prior weights, multi-race metrics
+Done 2026-10-06 on branch `sim-calibration`. Scored by `python -m f1tracker.calibrate` (leave-one-race-out over the 21 races and sprints of 2026, see README).
+- [x] 5. Per-car tyre choice: cheapest dry compound to the flag (extra-stop penalty past its life), two-compound rule per car. **Sprints have free tyre choice** (verified: the rule only applies to Grands Prix); the sim used to force a stop in sprints. No set inventory (new vs used sets)
+- [x] 6. Wet / inters: `conditions` (DRY / WET, or from lap N), default holds what most cars are on. No forecast invented; the sim panel has "rain (inters) / track dries from lap N". Wrong tyres stop when the time lost to the flag beats the pit loss. `slick_wet_s` = 6.0 s, median of 69 laps in the 5 mixed races of 2025-26 (wide spread). Inters on a dry track: fitted offset (too few laps to measure). Full wets folded into WET (rare in races)
+- [x] 7. Lapped cars: gap = car ahead's gap + interval (seconds even when the gap reads "1L"); leader's median green lap only when the interval is in laps. Rejoin error 1.38 → 0.84 places over 303 stops. Fixed a crash: "6L" gaps raised ValueError in the old parser
+- [x] 8. Overtaking: within 1 s at the line (2026 Overtake Mode: +0.5 MJ when within 1 s at one detection point per lap; DRS before) the car behind gets past with P = sigmoid(a + b·pace edge + c·gap), fitted on real passes. Pit / SC / VSC laps excluded. Lapped cars never block (they sit a lap behind in race time). Dirty air not separate: it's in the fitted odds
+- [x] 9. Calibration **per regulation era** (2018–21, 2022–25, 2026–; user's call: each era is a different car): `f1tracker/calibrate.py`, `calibration.json` → `sim.season_model(year)` (defaults < season facts: min mass + start fuel per year, verified < era calibration < config). Also fits dry tyre offsets/wear and tyre life per era; 2018's seven compound names relabelled to the race's SOFT/MEDIUM/HARD. Leave-one-out per era: 2018–21 1.65→1.56 places, 2022–25 1.66→1.55, 2026 1.32→1.22. Own-era vs 2026 fit on 2025 races: 1.64 vs 1.67 (small). SC/VSC per race + length from TrackStatus, SC/VSC lap factors, pass odds. Lap-fit knobs checked on a 4×5 grid: current prior weight 3 / half-life 4 laps were already best (0.678 s). VSC added to the sim
+
+## Added on request (2026-10-06): SC / VSC / red flag in the sim
+- [x] An SC / VSC / red flag that's out now: `State.neutral` (TrackStatus 4/6/7/5, race control's SafetyCar "IN THIS LAP") → `State.neutral_now()` → sim starts under it with the laps it likely has left
+- [x] "What if a safety car / VSC / red flag on lap N" row in the sim panel (What if and Best window), scenario shown above the result. Result area scrolls
+- [x] SC: stops first, then the field closes up by the end of each SC lap (the stop as the SC comes out is the cheap one; later ones cost places)
+- [x] Who pits under SC/VSC: logistic odds per era (`pit_neutral`: tyre age share, laps left, owes the two-compound rule, 1st/2nd lap of it, VSC) + a random intercept shared by all cars in one SC/VSC (`pit_neutral_sd`, own spread for SC and VSC; Gauss-Hermite marginal likelihood). Gap-to-car-behind feature tried: no better, dropped
+- [x] Out-of-sample validation (user's request, 2026-10-07), `scripts/validate_pit_neutral.py`: fit on earlier seasons of an era, test on its latest (2021, 2025, last 7 races of 2026). Worn rule / per-car odds / + shared factor:
+  - pos error 1.45/1.50/1.48 (2021), 1.64/1.67/1.66 (2025), 1.38/1.42/1.41 (2026): worn rule best by 0.02–0.05
+  - log score −2.14/−2.08/−2.06, −2.25/−2.14/−2.16, −2.09/−1.98/−2.03: fitted better everywhere; RPS equal; 80 % interval coverage 0.69/0.75/0.73, 0.69/0.73/0.72, 0.69/0.71/0.68 (all a bit narrow)
+  - pit/no-pit Brier 0.27/0.11/0.10, 0.16/0.07/0.07, 0.28/0.13/0.13; stops-per-SC spread ratio (1 = right) –/18/1.2, –/8.9/0.8, –/21/1.5
+  - weak spots: the 2026 holdout under-predicts stops (SC 14 % vs 24 %, VSC 5 % vs 18 %; 14 races to fit on); 2025's rare >75 % calls were over-confident (86 % vs 20 %, n=10). Refit after more 2026 races
+- [x] Red flags per era (`red_per_race` 0.12–0.14): free tyre change for all (counts for the two-compound rule, verified), field closes up
+- [x] Restarts: no DRS / Overtake Mode for `restart_laps` (2 until 2023, 1 from 2024; 2026 OM after every car passes the detection point; verified), passing odds `pass_restart` fitted on restart laps
+- [x] Backtests start under the SC/VSC as it really was. Effect on all eras: log score +0.13–0.15, mean position error +0.03–0.05 places (more realistic spread, slightly blurrier mean)
+- [x] Tests: SC now bunches + restart passing, SC-on-lap-N best window, red-flag free tyres, `State.neutral_now`
 
 ## Group 3 — Live / data
 - [ ] 10. Automatic live-session detection (tray toggle, default on)
-- [ ] 11. Better estimated positions (`trackPositionTime`, calibrated mini-sectors)
+- [x] 11. Better estimated positions (2026-10-06). The circuit API has no `trackPositionTime`, so `live.learn_positions` learns from archived GPS: where each timing mini-sector ends (median GPS spot as cars complete it, per sector, so a sector with another loop count spreads evenly between learned ends) and a time→distance profile of a green lap. Source: that weekend's latest finished session, else the circuit's latest in the two seasons before; measured on the current outline; cached per source + outline. Used by live feeds and no-GPS replays, on a background thread. Median error vs GPS on 9 races of 2026: 7–18 m on 8 (was 90–320 m); Hungary 153→120 m (its race GPS/timing offset differs from qualifying). Suzuka's crossover handled (search near the car's last spot); two loops at one spot allowed. Bad fits (loops clearly out of order, e.g. another layout) are rejected → old estimate
 - [x] 12. Replay: older seasons (2026-10-06). Year → weekend → session menus in F1 Live and the tray, 2018 to now. Sessions come from the archive's Index.json plus FastF1's schedule for the sessions the index leaves out (2018 Australia, 2024 before Spain, 2023 Qatar after FP1), kept only if the archive has their TimingData. F1 refuses most of 2022 (403); archive requests fall back to FastF1's mirror (`livetiming-mirror.fastf1.dev`, as FastF1 does), which has it. 2018 tyres use Pirelli's 2018 names and colours (`TYRE_2018`). Each year loads once per run when its menu first opens
-- [~] 13. Qualifying: Q1/Q2/Q3, countdown, knockout zone, sprint quali: **done in the live dashboard** (sector timing, 2026-10-06). The tray TimingTower widget still shows plain best laps
-- [ ] 14. Projected points in replays (incl. fastest-lap point 2019–2024)
+- [x] 13. Qualifying: Q1/Q2/Q3, countdown, knockout zone, sprint quali: live dashboard (sector timing) and, 2026-10-06, the tray TimingTower too (best of the current part, drop zone red, knocked out greyed). Checked on the Bahrain 2026 qualifying replay in Q2
+- [x] 14. Projected points in replays (2026-10-06): `ChampionshipPrediction` added to replays (in the archive from mid-2019). Earlier: Jolpica standings before the session (`data.standings_before`: after the previous round, plus the weekend's sprint for its Grand Prix) + that season's points (fastest-lap point 2019–2024 in the top 10, sprint 3-2-1 in 2021, 8–1 from 2022; verified). 2021's sprint ('Sprint Qualifying', Type Race) now counts as a sprint. Checked: Abu Dhabi 2018 → HAM 408, VET 320, Mercedes 655 (real final table); Silverstone 2021 sprint VER +3 HAM +2 BOT +1
 
 ## Group 4 — UX
 - [ ] 15. Settings dialog (validated, saved, applied without restart)
