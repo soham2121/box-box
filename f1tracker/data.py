@@ -119,6 +119,17 @@ def schedule():
             for r in races]
 
 
+# ponytail: scheduled lengths (Jolpica has start times only). A quali red flag that runs over shows the next countdown
+# early; read SessionStatus from the live feed if that matters. Race: 3 h, the cap including red flags.
+SESSION_MINUTES = {'FP1': 60, 'FP2': 60, 'FP3': 60, 'Sprint Quali': 45, 'Sprint': 60, 'Quali': 60, 'Race': 180}
+
+
+def live_session(race, now=None):
+    """Label of the weekend's session running now ('FP1'), or None."""
+    now = now or datetime.now(timezone.utc)
+    return next((s for s, t in race['sessions'] if t <= now < t + timedelta(minutes=SESSION_MINUTES.get(s, 60))), None)
+
+
 def next_race(now=None):
     """The current or upcoming weekend: race stays 'next' until 3 h after its start."""
     now = now or datetime.now(timezone.utc)

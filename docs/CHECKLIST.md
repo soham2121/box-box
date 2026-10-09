@@ -118,6 +118,15 @@ Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pen
 - [x] 13. Qualifying: Q1/Q2/Q3, countdown, knockout zone, sprint quali: live dashboard (sector timing) and, 2026-10-06, the tray TimingTower too (best of the current part, drop zone red, knocked out greyed). Checked on the Bahrain 2026 qualifying replay in Q2
 - [x] 14. Projected points in replays (2026-10-06): `ChampionshipPrediction` added to replays (in the archive from mid-2019). Earlier: Jolpica standings before the session (`data.standings_before`: after the previous round, plus the weekend's sprint for its Grand Prix) + that season's points (fastest-lap point 2019–2024 in the top 10, sprint 3-2-1 in 2021, 8–1 from 2022; verified). 2021's sprint ('Sprint Qualifying', Type Race) now counts as a sprint. Checked: Abu Dhabi 2018 → HAM 408, VET 320, Mercedes 655 (real final table); Silverstone 2021 sprint VER +3 HAM +2 BOT +1
 
+## Added on request (2026-10-09): dashboard look, monitors, live countdown
+- [x] Live dashboard restyled: dark panels with rounded corners and gaps, Bahnschrift condensed type (ships with Windows), upper-case tabs with a red underline, styled menus/combos/sliders (`chevron.svg` for the combo arrow), zebra rows in docked tables
+- [x] Status line as chips: feed (green dot while live), session, lap, track status in its flag colour
+- [x] Timing tower: session's fastest lap in purple. Sim: the four likeliest finishes as a shaded bar. Map: verge + tarmac outline
+- [x] Widgets off every screen (monitor unplugged or rearranged) move onto the nearest screen's work area, at start and on screen changes (`widgets.onto_screen`)
+- [x] Next race shows `<session> LIVE` while a session runs (`data.live_session`, scheduled lengths; a red flag that runs over ends it early)
+- [x] Tests: `onto_screen` (2 monitors, offset), `live_session`. 53 pass
+- [x] README: animated banner (`docs/banner.svg`, real Marina Bay outline from MultiViewer, SMIL so it plays on GitHub), badges, section links
+
 ## Group 4 — UX
 - [ ] 15. Settings dialog (validated, saved, applied without restart)
 - [x] 16. Desktop layer survives Win+D (done early on request, 2026-10-06). Rainmeter's method: every 250 ms, if the foreground window is the desktop (shell window, or WorkerW/Progman hosting SHELLDLL_DefView) the widgets go topmost, otherwise back to the bottom. Qt's WindowStaysOnBottomHint had to go: Qt forced those windows back to the bottom. Verified with Show desktop on this PC (Windows 11 build 26200)

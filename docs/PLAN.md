@@ -1,6 +1,6 @@
 # F1 Tracker — correctness fixes + feature plan
 
-**Status (2026-10-07):** Groups 1–2 done; Group 3 items 11–14 done, item 10 to be built and tested live on the Singapore weekend (9–11 Oct). Also done on request: SC / VSC / red flag in the sim, per-era calibration. Branch `sim-calibration` pushed, PR to `main` pending (the user merges). Next: Group 4, then Group 5. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-09):** Groups 1–2 done; Group 3 items 11–14 done, item 10 to be built and tested live on the Singapore weekend (9–11 Oct). Also done on request: SC / VSC / red flag in the sim, per-era calibration (merged, PR #2), dashboard restyle, off-screen widget fix, live countdown. Next: Group 4, then Group 5. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.
