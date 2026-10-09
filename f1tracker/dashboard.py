@@ -4,6 +4,7 @@ import getpass
 import json
 import sys
 import time
+from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QListWidget,
@@ -12,11 +13,56 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFormLayout, QH
 
 from . import data, live, sim
 from .main import already_running, console_to_file, icon, listen, load_config
-from .widgets import RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap, TyrePanel, bg, replay_years
+from .widgets import (COND_BOLD, STATUS_TINT, RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap,
+                      TyrePanel, bg, replay_years)
 
 INSTANCE = f'f1tracker-live-{getpass.getuser()}'  # one dashboard per Windows user, so one live connection
 SETTINGS = data.APP_DIR / 'dashboard.json'  # own file: the tray app rewrites config.json whenever it saves
 SPEEDS = (1, 5, 10, 30, 60)
+ACCENT = '#E10600'
+CHEVRON = (Path(__file__).parent / 'chevron.svg').as_posix()
+STYLE = f'''
+QMainWindow {{ background: #0B0C10; }}
+QSplitter::handle {{ background: #0B0C10; }}
+QToolBar {{ background: #101217; border: 0; border-bottom: 1px solid #1E2129; spacing: 4px; padding: 8px 12px; }}
+QToolBar::separator {{ background: #252934; width: 1px; margin: 8px 8px; }}
+QToolButton {{ color: #C9CCD6; font: 10pt "Segoe UI"; padding: 8px 14px; border-radius: 10px; }}
+QToolButton:hover {{ background: #1C1F27; color: #FFFFFF; }}
+QToolButton:disabled {{ color: #5D6372; }}
+QToolButton#live {{ background: {ACCENT}; color: #FFFFFF; font-weight: 600; }}
+QToolButton#live:hover {{ background: #F5281E; }}
+QLabel#brand {{ color: #ECEDF1; font: 15pt "{COND_BOLD}"; padding: 0 14px 0 4px; }}
+QLabel#status {{ color: #C9CCD6; font: 10pt "Segoe UI"; }}
+QLabel#chip {{ background: #16181E; border: 1px solid #252934; border-radius: 13px; padding: 4px 11px;
+               color: #C9CCD6; font: 10pt "{COND_BOLD}"; }}
+QMenu {{ background: #16181E; color: #ECEDF1; border: 1px solid #252934; font: 10pt "Segoe UI"; padding: 4px; }}
+QMenu::item {{ padding: 6px 22px; border-radius: 6px; }}
+QMenu::item:selected {{ background: #252934; }}
+QMenu::item:disabled {{ color: #5D6372; }}
+QTabWidget::pane {{ border: 0; }}
+QTabWidget::tab-bar {{ left: 10px; }}
+QTabBar {{ background: transparent; qproperty-drawBase: 0; }}
+QTabBar::tab {{ background: transparent; color: #7E8494; font: 11pt "{COND_BOLD}"; padding: 9px 2px 7px; margin-right: 18px;
+                border: 0; border-bottom: 2px solid transparent; }}
+QTabBar::tab:hover {{ color: #C9CCD6; }}
+QTabBar::tab:selected {{ color: #ECEDF1; border-bottom: 2px solid {ACCENT}; }}
+QComboBox, QSpinBox {{ background: #0E1015; color: #ECEDF1; border: 1px solid #2A2E39; border-radius: 8px; padding: 5px 8px; }}
+QComboBox:disabled, QSpinBox:disabled {{ color: #5D6372; border-color: #1E2129; }}
+QComboBox::drop-down {{ border: 0; width: 22px; }}
+QComboBox::down-arrow {{ image: url({CHEVRON}); width: 12px; height: 12px; }}
+QSpinBox::up-button, QSpinBox::down-button {{ width: 0; border: 0; }}  /* styled boxes lose their arrows: type or scroll */
+QComboBox QAbstractItemView {{ background: #16181E; color: #ECEDF1; selection-background-color: #252934; border: 1px solid #252934; }}
+QPushButton {{ background: #171920; color: #ECEDF1; border: 1px solid #2E3240; border-radius: 9px; padding: 8px 14px; }}
+QPushButton:hover {{ background: #1F222B; }}
+QPushButton#primary {{ background: {ACCENT}; border: 0; color: #FFFFFF; font-weight: 600; }}
+QPushButton#primary:hover {{ background: #F5281E; }}
+QSlider::groove:horizontal {{ height: 4px; background: #252934; border-radius: 2px; }}
+QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
+QSlider::handle:horizontal {{ background: #ECEDF1; width: 14px; margin: -5px 0; border-radius: 7px; }}
+QDialog, QListWidget {{ background: #121419; color: #ECEDF1; }}
+QDialog QLabel {{ color: #C9CCD6; }}
+QListWidget {{ border: 1px solid #252934; border-radius: 8px; }}
+'''
 VIEW = {'label_scale': 1.0, 'follow': None, 'delay': 0, 'replay_speed': 10}  # Settings… (saved in dashboard.json); follow None = everyone
 
 
@@ -97,15 +143,7 @@ class Dashboard(QMainWindow):
         self.state, self.static, self.signed_in = None, {}, None
         self.setWindowTitle('F1 live')
         self.setWindowIcon(icon())
-        self.setStyleSheet(
-            'QMainWindow { background: #0b0b10; } QSplitter::handle { background: #0b0b10; }'
-            ' QToolBar { background: #15151c; border: 0; spacing: 4px; padding: 4px; }'
-            ' QToolButton, QLabel#status { color: #ddd; font: 10pt "Segoe UI"; }'
-            ' QToolButton { padding: 4px 10px; border-radius: 4px; } QToolButton:hover { background: #2a2a35; }'
-            ' QToolButton:disabled { color: #666; } QMenu { font: 10pt "Segoe UI"; }'
-            ' QTabWidget::pane { border: 0; } QTabBar { background: #0b0b10; }'
-            ' QTabBar::tab { background: #15151c; color: #999; font: 9pt "Segoe UI"; padding: 4px 14px; border: 0; }'
-            ' QTabBar::tab:selected { color: #fff; border-bottom: 2px solid #e10600; }')
+        self.setStyleSheet(STYLE)
 
         # right side: one layout for races/sprints, one for practice/qualifying, picked by the session type.
         # Race control appears in both, so there are two of it (a Qt widget has one parent).
@@ -114,10 +152,10 @@ class Dashboard(QMainWindow):
         self.sim, self.rc = SimPanel(self, 'sim', self), RaceControl(self, 'rc', self)
         self.sectors, self.tyres, self.rc2 = SectorTower(self, 'sectors', self), TyrePanel(self, 'tyres', self), RaceControl(self, 'rc', self)
         self.top_tabs, self.bottom_tabs = QTabWidget(documentMode=True), QTabWidget(documentMode=True)
-        self.top_tabs.addTab(self.tower, 'Timing')
-        self.top_tabs.addTab(self.stints, 'Tyre stints')
-        self.bottom_tabs.addTab(self.sim, 'Strategy sim')
-        self.bottom_tabs.addTab(self.rc, 'Race control')
+        self.top_tabs.addTab(self.tower, 'TIMING')
+        self.top_tabs.addTab(self.stints, 'TYRE STINTS')
+        self.bottom_tabs.addTab(self.sim, 'STRATEGY SIM')
+        self.bottom_tabs.addTab(self.rc, 'RACE CONTROL')
         self.race_split = QSplitter(Qt.Vertical)
         self.race_split.addWidget(self.top_tabs)
         self.race_split.addWidget(self.bottom_tabs)
@@ -133,11 +171,16 @@ class Dashboard(QMainWindow):
         self.split = QSplitter(Qt.Horizontal)
         self.split.addWidget(self.map)
         self.split.addWidget(self.pages)
+        self.split.setContentsMargins(10, 10, 10, 10)
+        for w in (self.split, self.race_split, self.quali_split, self.quali_bottom):
+            w.setHandleWidth(10)  # the gaps between the panels
         self.setCentralWidget(self.split)
 
         bar = QToolBar(movable=False)
         self.addToolBar(bar)
+        bar.addWidget(QLabel(f"<span style='color:{ACCENT}'>▰</span> F1 LIVE", objectName='brand'))
         self.live_btn = bar.addAction('● Go live', self.start_live)
+        bar.widgetForAction(self.live_btn).setObjectName('live')
         rp = QToolButton(text='Replay', popupMode=QToolButton.InstantPopup)
         self.replay_menu = QMenu(rp)
         self.replay_menu.aboutToShow.connect(self.build_replay_menu)
@@ -151,8 +194,11 @@ class Dashboard(QMainWindow):
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
-        self.status = QLabel(objectName='status')
-        bar.addWidget(self.status)
+        chips = QWidget()
+        self.chip_row = QHBoxLayout(chips)
+        self.chip_row.setContentsMargins(0, 0, 0, 0)
+        self.chip_row.setSpacing(6)
+        bar.addWidget(chips)
 
         # replay controls, second row, only while a replay plays
         self.addToolBarBreak()
@@ -320,7 +366,7 @@ class Dashboard(QMainWindow):
         for w in (self.map, self.tower, self.stints, self.sim, self.rc, self.sectors, self.tyres, self.rc2):
             if w.isVisible():  # hidden tabs and the other layout catch up when shown (next tick, 0.5 s)
                 w.tick()
-        self.status.setText(self.status_text())
+        self.show_chips()
         self.update_replay_bar()
 
     def status_text(self):
@@ -338,6 +384,24 @@ class Dashboard(QMainWindow):
             parts.append(f"air {w.get('AirTemp', '?')}° · track {w.get('TrackTemp', '?')}°"
                          + (' · RAIN' if str(w.get('Rainfall')) == '1' else ''))
         return ' · '.join(p for p in parts if p)
+
+    def show_chips(self):
+        """The status line as chips: one per ' · ' part. Feed in green while live, track status in its flag colour."""
+        st = self.state
+        parts = self.status_text().split(' · ')
+        track = st and st.session()['track']
+        tint = st and {'2': '#FFD400', **STATUS_TINT}.get(str(st.d.get('TrackStatus', {}).get('Status')))  # 2: yellow
+        while self.chip_row.count() < len(parts):
+            self.chip_row.addWidget(QLabel(objectName='chip'))
+        for i in range(self.chip_row.count()):
+            chip = self.chip_row.itemAt(i).widget()
+            chip.setVisible(i < len(parts))
+            if i >= len(parts):
+                continue
+            text = parts[i]
+            col = (tint or '#3DDC84') if track and text.startswith(track) else '#3DDC84' if i == 0 and text.startswith('live') else None
+            chip.setText((f"<span style='color:{col}'>●</span> " if col else '') + text.upper())
+            chip.setStyleSheet(f'color: {col}; border-color: {col};' if col and i else '')  # the feed chip only gets the dot
 
     def restore(self):
         self.resize(1600, 900)

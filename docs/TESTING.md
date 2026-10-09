@@ -218,3 +218,9 @@ Close and reopen F1 Live first.
 3. Jump into the lap-9 SC of that race (laps 9–12), What if: the result says `SC out now (~N laps left)`; after race control's "SAFETY CAR IN THIS LAP" it says ~1 lap.
 4. **red flag on lap** N: cars that owe a stop no longer have to pit later (free tyre change).
 5. `.venv\Scripts\python scripts\validate_pit_neutral.py` (about half an hour) prints, per era, the worn rule vs the fitted odds vs + shared factor on seasons the fit never saw; the shared factor's "spread ratio" is near 1.
+
+## Dashboard look, monitors, live countdown (added 2026-10-09)
+1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, lap 9. Toolbar chips: the feed, session, lap, and the track status chip in yellow while the SC is out. The fastest lap in the timing tower is purple; the sim's What if shows a green bar of the likeliest finishes.
+2. With a second monitor: drag a tray widget onto it, quit, unplug the monitor (or move it in Windows display settings), start again. The widget sits on the nearest screen's edge instead of off screen. Same while the app runs: about half a second after the change.
+3. During a session (Singapore FP1, Fri 9 Oct): the Next race widget shows `FP1 LIVE` in green instead of the countdown, then the countdown to the next session an hour after the start.
+4. GitHub: open the repo page. The README banner animates (cars lap Marina Bay, five lights come on, then go out).

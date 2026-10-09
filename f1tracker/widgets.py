@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
-from PySide6.QtWidgets import (QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QSizeGrip, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
 from . import data, live, sim
@@ -24,6 +24,7 @@ def tyre_style(cmp, st):
     return season.get(cmp, ('?', '#888'))
 POINTS = {'Race': [25, 18, 15, 12, 10, 8, 6, 4, 2, 1], 'Sprint': [8, 7, 6, 5, 4, 3, 2, 1]}
 STATUS_TINT = {'4': '#ffd400', '5': '#ff2020', '6': '#ff9900', '7': '#ff9900'}  # SC, red flag, VSC, VSC ending
+COND, COND_BOLD = 'Bahnschrift SemiCondensed', 'Bahnschrift SemiBold SemiCondensed'  # live dashboard type
 
 
 class _Bus(QObject):
@@ -79,17 +80,29 @@ def fill_year(sub, year, start):
             m.addAction(session, lambda _=0, p=path: start(p))
 
 
-def table(rows):
-    """Rows of cells -> rich-text table. A cell starting with '#' is a colour bar."""
-    out = ['<table cellspacing=0 cellpadding=2 width=100%>']
-    for r in rows:
-        out.append('<tr>' + ''.join(f'<td bgcolor="{c}" width=3></td>' if str(c).startswith('#') else f'<td>{c}</td>'
+def table(rows, zebra=False):
+    """Rows of cells -> rich-text table. A cell starting with '#' is a colour bar. zebra: every other row shaded
+    (the live dashboard's solid panels; the translucent desktop widgets stay plain)."""
+    out = [f'<table cellspacing=0 cellpadding=2 width=100%>']
+    for i, r in enumerate(rows):
+        out.append(('<tr bgcolor="#171920">' if zebra and i % 2 else '<tr>') + ''.join(f'<td bgcolor="{c}" width=3></td>' if str(c).startswith('#') else f'<td>{c}</td>'
                                     for c in r) + '</tr>')
     return ''.join(out) + '</table>'
 
 
 def r(s):
     return f'<div align=right>{s}</div>'
+
+
+def onto_screen(g, screens):
+    """A saved position (QRect) moved onto the nearest screen's work area when its centre is on none of them
+    (a monitor was unplugged or rearranged in Windows display settings). None if it's visible already."""
+    c = g.center()
+    if not screens or any(s.contains(c) for s in screens):
+        return None
+    s = min(screens, key=lambda s: (s.center() - c).manhattanLength())
+    return (min(max(g.x(), s.left()), s.right() + 1 - g.width()),
+            min(max(g.y(), s.top()), s.bottom() + 1 - g.height()))
 
 
 class Widget(QWidget):
@@ -101,9 +114,12 @@ class Widget(QWidget):
         super().__init__(parent)
         self.app, self.key, self.cfg, self.docked = app, key, app.cfg['widgets'][key], parent is not None
         self.setAttribute(Qt.WA_TranslucentBackground)
-        self.setStyleSheet('QLabel { color: #eee; font: 10pt "Segoe UI"; } QLabel#t { font: bold 10pt "Segoe UI"; color: #e10600; }')
+        if self.docked:  # live dashboard: condensed type like F1's own graphics (Bahnschrift ships with Windows)
+            self.setStyleSheet(f'QLabel {{ color: #ECEDF1; font: 10pt "{COND}"; }} QLabel#t {{ font: 12pt "{COND_BOLD}"; color: #ECEDF1; }}')
+        else:
+            self.setStyleSheet('QLabel { color: #eee; font: 10pt "Segoe UI"; } QLabel#t { font: bold 10pt "Segoe UI"; color: #e10600; }')
         self.lay = QVBoxLayout(self)
-        self.lay.setContentsMargins(12, 8, 12, 8)
+        self.lay.setContentsMargins(*((16, 12, 16, 12) if self.docked else (12, 8, 12, 8)))
         head = QHBoxLayout()
         self.head = QLabel(self.title, objectName='t')
         head.addWidget(self.head, 1)
@@ -118,6 +134,7 @@ class Widget(QWidget):
             return
         g = self.cfg.get('geom')
         self.setGeometry(*(g or (60 + 40 * list(app.cfg['widgets']).index(key), 80 + 40 * list(app.cfg['widgets']).index(key), *self.size_hint)))
+        self.keep_on_screen()
         self.apply_flags()
         self.apply_opacity()
 
@@ -150,9 +167,14 @@ class Widget(QWidget):
     def paintEvent(self, e):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
+        if self.docked:
+            p.setPen(QPen(QColor('#20232C'), 1))
+            p.setBrush(QColor('#121419'))
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(.5, .5, -.5, -.5), 14, 14)
+            return
         p.setPen(Qt.NoPen)
         # alpha >= 1: fully transparent pixels are click-through on Windows, and the widget couldn't be dragged
-        p.setBrush(QColor(16, 16, 22, 225 if self.docked else max(1, round(255 * self.app.cfg['bg_opacity']))))
+        p.setBrush(QColor(16, 16, 22, max(1, round(255 * self.app.cfg['bg_opacity']))))
         p.drawRoundedRect(self.rect(), 10, 10)
 
     def mousePressEvent(self, e):
@@ -169,6 +191,12 @@ class Widget(QWidget):
 
     def resizeEvent(self, e):
         self.save_geom()
+
+    def keep_on_screen(self):
+        pos = onto_screen(self.geometry(), [s.availableGeometry() for s in QApplication.screens()])
+        if pos:
+            self.move(*pos)
+            self.save_geom()
 
     def save_geom(self):
         if self.docked:
@@ -318,8 +346,10 @@ class NextRace(Widget):
             return
         now = datetime.now(timezone.utc)
         upcoming = [s for s in race['sessions'] if s[1] > now]
-        cd = ''
-        if upcoming:
+        on = data.live_session(race, now)
+        if on:
+            cd = f"<p style='font-size:15pt;color:#5f5'><b>{on} LIVE</b></p>"
+        elif upcoming:
             left = int((upcoming[0][1] - now).total_seconds())
             cd = f"<p style='font-size:15pt'><b>{upcoming[0][0]}</b> in {left // 86400}d {left % 86400 // 3600:02}:{left % 3600 // 60:02}:{left % 60:02}</p>"
         else:
@@ -363,7 +393,8 @@ class TrackMap(Widget):
         if tint:
             p.setPen(QPen(QColor(tint), 3))
             p.setBrush(Qt.NoBrush)
-            p.drawRoundedRect(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5), 10, 10)
+            radius = 14 if self.docked else 10
+            p.drawRoundedRect(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5), radius, radius)
 
         a = np.radians(st.track.rotation)  # same convention as FastF1's rotate()
         rot = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
@@ -381,19 +412,20 @@ class TrackMap(Widget):
             path.lineTo(to(q))
         k = max(1.0, min(self.width(), self.height()) / 380)  # markers grow with the map (big in the live dashboard)
         p.setBrush(Qt.NoBrush)
-        p.setPen(QPen(QColor(90, 90, 100), 7 * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-        p.drawPath(path)
+        for colour, width in (('#1C1F27', 16), ('#3A3F4D', 8)):  # dark verge, then the tarmac
+            p.setPen(QPen(QColor(colour), width * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+            p.drawPath(path)
 
         cars, gps = st.positions()
         dl = st.d.get('DriverList', {})
         order = {d['drv']: d['pos'] for d in st.drivers()}
         f = k * self.app.cfg.get('label_scale', 1.0)  # name size, live dashboard settings
         follow = self.app.cfg.get('follow')  # names shown only for these drivers (TLAs); None: everyone
-        p.setFont(QFont('Segoe UI', max(5, round(7 * f)), QFont.Bold))
+        p.setFont(QFont(COND_BOLD, max(5, round(8 * f))))
         cars = [(n, to(np.array([x, y]) @ rot), pit, dl.get(n) if isinstance(dl.get(n), dict) else {})
                 for n, x, y, pit in sorted(cars, key=lambda c: order.get(c[0], 99))]
         for n, pt, pit, info in reversed(cars):  # leader's dot drawn last (on top)
-            p.setPen(QPen(QColor(20, 20, 20), 1))
+            p.setPen(QPen(QColor('#0B0C10'), 1.5))
             p.setBrush(QColor(110, 110, 110) if pit else QColor(STATUS_TINT['4']) if n in live.SAFETY_CARS
                        else QColor('#' + info.get('TeamColour', '888888')))
             p.drawEllipse(pt, 5 * k, 5 * k)
@@ -414,8 +446,8 @@ class TrackMap(Widget):
         if w.get('WindDirection') not in (None, ''):
             self.draw_wind(p, rot, float(w['WindDirection']), w.get('WindSpeed', '?'), k)
 
-        p.setFont(QFont('Segoe UI', 8))
-        p.setPen(QColor('#5f5') if gps else QColor('#fc5'))
+        p.setFont(QFont(COND, 9))
+        p.setPen(QColor('#3DDC84') if gps else QColor('#fc5'))
         p.drawText(QRectF(self.rect()).adjusted(12, 0, -12, -8), Qt.AlignBottom | Qt.AlignLeft,
                    f"{'GPS' if gps else 'ESTIMATED'} · {getattr(st.feed, 'status', '')} · {st.session()['track']}")
 
@@ -483,6 +515,7 @@ class TimingTower(Widget):
         grey = "<span style='color:#777'>{}</span>".format
         lines = st.d.get('TimingData', {}).get('Lines', {})
         rows = [['', '', '', r(grey('INT')), r(grey('LEADER')), r(grey('LAST')), r(grey('BEST')), grey('TYRE'), grey('STOPS')]] if wide else []
+        fastest = min((d['best'] for d in st.drivers() if d['best']), key=lambda b: live.secs(b) or 1e9, default=None)
         for d in st.drivers()[:self.cfg['n']]:
             letter, col = tyre_style(d['cmp'], st)
             if not race:  # practice / qualifying: best lap of the current part, drop zone, knocked-out cars greyed
@@ -496,11 +529,12 @@ class TimingTower(Widget):
             gap = d['int'] if d['pos'] > 1 else d['laps'] and f"L{d['laps']}"
             rows.append([d['pos'], f"#{d['colour']}", f"<b>{d['code']}</b>" if not d['out'] else f"<s>{d['code']}</s>",
                          r(gap or ''), *([r(grey(d['gap'] if d['pos'] > 1 else ''))] if wide else []),
-                         r(f"<span style='color:#999'>{d['last']}</span>"), *([r(grey(d['best']))] if wide else []),
+                         r(f"<span style='color:#999'>{d['last']}</span>"),
+                         *([r(f"<span style='color:{PURPLE}'>{d['best']}</span>" if d['best'] == fastest else grey(d['best']))] if wide else []),
                          f"<span style='color:{col}'><b>{letter}</b></span>{d['age']}",
                          'PIT' if d['pit'] else grey(d['stops'] or '')])
         status = getattr(st.feed, 'status', '')
-        self.body.setText(f"<span style='color:#999'>{status} · {s['track']} {s['status']}</span>" + table(rows))
+        self.body.setText(f"<span style='color:#999'>{status} · {s['track']} {s['status']}</span>" + table(rows, self.docked))
 
 
 class SimPanel(Widget):
@@ -511,7 +545,7 @@ class SimPanel(Widget):
         super().__init__(app, key, parent)
         self.drv, self.lap, self.cmp = QComboBox(), QSpinBox(minimum=1, maximum=99), QComboBox()
         self.cmp.addItems(['MEDIUM', 'HARD', 'SOFT', 'INTERMEDIATE', 'WET'])
-        go, best = QPushButton('What if'), QPushButton('Best window')
+        go, best = QPushButton('What if', objectName='primary'), QPushButton('Best window')
         go.clicked.connect(lambda: self.run(False))
         best.clicked.connect(lambda: self.run(True))
         row = QHBoxLayout()
@@ -645,10 +679,14 @@ class SimPanel(Widget):
                 [f'L{L}', f"<span style='color:{tyre_style(c, self.app.state)[1]}'>{c}</span>", r(f'P{mean:.2f}')] for mean, L, c in x[:8]))
             return
 
-        def dist(a):
+        def dist(a):  # the 4 likeliest finishes as a bar, likeliest brightest
             v, n = np.unique(a, return_counts=True)
             top = sorted(zip(n, v), reverse=True)[:4]
-            return ' '.join(f'P{int(p)} {c / len(a):.0%}' for c, p in top)
+            cells = ''.join(f"<td width='{100 * c / len(a):.0f}%' bgcolor='{shade}' align=center>"
+                            f"<span style='color:{'#0B0C10' if i == 0 else '#ECEDF1'};font-size:8pt'>"
+                            f"{f'P{int(p)} {c / len(a):.0%}' if c / len(a) >= 0.12 else ''}</span></td>"
+                            for i, ((c, p), shade) in enumerate(zip(top, ('#3DDC84', '#2A8F58', '#1E5E3C', '#173B28'))))
+            return f"<table width=100% cellspacing=1 cellpadding=1><tr>{cells}<td></td></tr></table>"
         pit_lap, cmp, x = x
         b, p = x['base'], x['plan']
         delta = b.mean() - p.mean()
@@ -728,7 +766,7 @@ class SectorTower(Widget):
                          *(sectors + [''] * 3)[:3], r(f"<span style='color:{lcol}'>{last.get('Value', '')}</span>"),
                          tyre(d['cmp'], d['age'], st), r(grey(d['laps'] or '')), 'PIT' if d['pit'] else ''])
         self.body.setText(f"<span style='color:#999'>{getattr(st.feed, 'status', '')} · {s['track']} {s['status']}</span>"
-                          f"<div style='font-size:9pt'>{table(rows)}</div>")  # 9pt: 22 rows fit
+                          f"<div style='font-size:9pt'>{table(rows, self.docked)}</div>")  # 9pt: 22 rows fit
 
 
 class TyrePanel(Widget):
@@ -750,7 +788,7 @@ class TyrePanel(Widget):
         half = (len(cells) + 1) // 2  # two drivers per row: 22 don't fit one under the other
         rows = [a + [''] + (cells[half + i] if half + i < len(cells) else []) for i, a in enumerate(cells[:half])]
         self.body.setText("<span style='color:#777'>tyre + laps on it · new/used · sets so far</span>"
-                          f"<div style='font-size:9pt'>{table(rows)}</div>")
+                          f"<div style='font-size:9pt'>{table(rows, self.docked)}</div>")
 
 
 class StintPanel(Widget):
@@ -788,7 +826,7 @@ class StintPanel(Widget):
             rows.append([d['pos'] if d['pos'] < 99 else '', f"#{d['colour']}",
                          f"<b>{d['code']}</b>" if not d['out'] else f"<s>{d['code']}</s>", bar,
                          r(d['stops'] or ''), r(grey(f'{last:.1f}s' if last else ''))])
-        self.body.setText(f"<div style='font-size:9pt'>{table(rows)}</div>"
+        self.body.setText(f"<div style='font-size:9pt'>{table(rows, self.docked)}</div>"
                           "<span style='color:#777'>last stop = time stationary (sent with F1 TV)</span>")
 
 
@@ -814,7 +852,7 @@ class RaceControl(Widget):
                 pass
             col = FLAG.get(m.get('Flag')) or ('#ffd400' if m.get('Category') == 'SafetyCar' else '#444444')
             rows.append([f"<span style='color:#888'>{when.strip()}</span>", col, html.escape(m.get('Message', ''))])
-        self.body.setText(f"<span style='color:#999'>{weather}</span>" + (table(rows) if rows else '<br><i>no messages yet</i>'))
+        self.body.setText(f"<span style='color:#999'>{weather}</span>" + (table(rows, self.docked) if rows else '<br><i>no messages yet</i>'))
 
 
 KINDS = {'drivers': DriverStandings, 'teams': ConstructorStandings, 'next': NextRace,

@@ -93,6 +93,19 @@ class App:
         self.desk_timer = QTimer(timeout=self.keep_on_desktop, interval=250)
         self.desk_timer.start()
         qapp.aboutToQuit.connect(self.save)
+        # a monitor unplugged or rearranged: bring stranded widgets back (Qt only moves them off a removed screen)
+        qapp.screenAdded.connect(self.watch_screen)
+        qapp.screenRemoved.connect(lambda s: QTimer.singleShot(500, self.fit_screens))
+        for s in qapp.screens():
+            self.watch_screen(s)
+
+    def watch_screen(self, s):
+        s.geometryChanged.connect(lambda _: QTimer.singleShot(500, self.fit_screens))
+        QTimer.singleShot(500, self.fit_screens)
+
+    def fit_screens(self):
+        for w in self.windows.values():
+            w.keep_on_screen()
 
     def keep_on_desktop(self):
         """Desktop layer that survives Win+D (Rainmeter's 'On desktop' approach), checked every 250 ms: whenever the

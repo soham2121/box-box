@@ -1,6 +1,28 @@
-# F1 tracker
+<p align="center">
+  <img src="docs/banner.svg" alt="F1 Tracker: cars lapping Marina Bay under five start lights" width="100%">
+</p>
+
+<p align="center">
+  <img src="https://img.shields.io/badge/python-3.11+-3776AB?style=flat-square&logo=python&logoColor=white" alt="Python 3.11+">
+  <img src="https://img.shields.io/badge/Windows-10%20%7C%2011-0078D4?style=flat-square" alt="Windows 10 | 11">
+  <img src="https://img.shields.io/badge/Qt-PySide6-41CD52?style=flat-square&logo=qt&logoColor=white" alt="PySide6">
+  <img src="https://img.shields.io/badge/data-FastF1%20%C2%B7%20Jolpica%20%C2%B7%20MultiViewer-E10600?style=flat-square" alt="Data: FastF1, Jolpica, MultiViewer">
+  <img src="https://img.shields.io/badge/replays-2018%E2%86%92now-15151E?style=flat-square" alt="Replays 2018 to now">
+</p>
+
+<p align="center">
+  <a href="#setup">Setup</a> ·
+  <a href="#widgets">Widgets</a> ·
+  <a href="#live-dashboard">Live dashboard</a> ·
+  <a href="#strategy-sim-knobs">Strategy sim</a> ·
+  <a href="#calibration-per-regulation-era">Calibration</a> ·
+  <a href="#tests">Tests</a>
+</p>
 
 Windows desktop widgets for Formula 1: championship standings, next race countdown, a live track map and timing tower, and a strategy simulator for pit stop what-ifs.
+
+> [!TIP]
+> No race on? **Replay** any session from 2018 on through the same widgets and dashboard, at up to 60x.
 
 ## Setup
 
@@ -22,7 +44,7 @@ powershell -ExecutionPolicy Bypass -File scripts\create_shortcuts.ps1
 
 (Run it again if you move the project folder.) Without shortcuts: double-click `F1 Tracker.bat` / `F1 Live.bat`, or run `.venv\Scripts\pythonw.exe run.pyw`.
 
-The app starts as a tray icon (red **F1**). Right-click it for everything else. Tray → **Start with Windows** makes it start at login (per-user, no admin). Widgets come back where you left them: positions are saved a second after every move or resize.
+The app starts as a tray icon (red **F1**). Right-click it for everything else. Tray → **Start with Windows** makes it start at login (per-user, no admin). Widgets come back where you left them: positions are saved a second after every move or resize. A widget left off every screen (a monitor unplugged or rearranged) moves onto the nearest one.
 
 ## Widgets
 
@@ -30,7 +52,7 @@ The app starts as a tray icon (red **F1**). Right-click it for everything else. 
 |---|---|
 | Driver standings | Top N drivers; during a live or replayed race/sprint, the standings if it finished now (F1's own projection feed, so sprint points never count twice) |
 | Constructor standings | Top N teams; same projection |
-| Next race | Weekend sessions in your local time, countdown to the next one |
+| Next race | Weekend sessions in your local time, countdown to the next one; `FP1 LIVE` (green) while a session runs |
 | Track map | Car positions, safety car, SC/VSC/red flag border |
 | Timing tower | Position, interval, last lap, tyre + age, stops, pit status |
 | Strategy sim | Pit rejoin position, "pit on lap N for compound C" vs current plan, best stop window, "what if it rains / dries from lap N", "what if a safety car / VSC / red flag comes out on lap N" |
@@ -41,7 +63,7 @@ On the desktop layer the widgets sit behind your apps but stay visible after **W
 
 ## Live dashboard
 
-One window for the whole weekend. No championship standings. The track map with the wind compass is always on the left. The right side changes with the session type (also in replays):
+One window for the whole weekend, in a dark theme with F1-style condensed type (Bahnschrift, ships with Windows). No championship standings. The track map with the wind compass is always on the left. The right side changes with the session type (also in replays):
 
 | | Top right | Bottom right |
 |---|---|---|
@@ -57,7 +79,7 @@ One window for the whole weekend. No championship standings. The track map with 
 - **Tyres:** current compound and its age, new or used, sets used so far.
 - **Race control:** messages newest first with lap, time and flag colour; weather on top.
 
-Tab choices and splitter sizes are remembered.
+Tab choices and splitter sizes are remembered. The toolbar's status shows as chips: the feed (green dot while live), session, lap, and the track status in its flag colour (yellow, SC, VSC, red). The timing tower marks the session's fastest lap in purple, and the sim shows its four likeliest finishes as a bar.
 
 Start it by double-clicking **`F1 Live.bat`**, or with tray → **Open live dashboard**. It connects to the live feed straight away.
 
