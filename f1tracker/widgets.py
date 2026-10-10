@@ -1,15 +1,17 @@
 """Desktop widgets: frameless, draggable, translucent windows. Data comes from data.py (static) and App.state (live)."""
+import collections
 import html
 import threading
+import time
 from datetime import datetime, timezone
 
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
-from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPolygonF
+from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
 from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QScrollArea,
                                QSizeGrip, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
-from . import data, live, sim
+from . import data, live, radio, sim
 
 TYRE = {'SOFT': ('S', '#ff3333'), 'MEDIUM': ('M', '#ffd400'), 'HARD': ('H', '#f0f0f0'),
         'INTERMEDIATE': ('I', '#39b54a'), 'WET': ('W', '#2f7cff')}
@@ -24,6 +26,8 @@ def tyre_style(cmp, st):
     return season.get(cmp, ('?', '#888'))
 POINTS = {'Race': [25, 18, 15, 12, 10, 8, 6, 4, 2, 1], 'Sprint': [8, 7, 6, 5, 4, 3, 2, 1]}
 STATUS_TINT = {'4': '#ffd400', '5': '#ff2020', '6': '#ff9900', '7': '#ff9900'}  # SC, red flag, VSC, VSC ending
+TARMAC = {'4': '#b89a00', '6': '#b89a00', '7': '#b89a00', '5': '#b01818'}  # SC / VSC yellow, red flag red (dimmed: dots on top)
+BLINK = {'6', '7'}  # VSC: the border flashes; SC and red flag stay solid
 COND, COND_BOLD = 'Bahnschrift SemiCondensed', 'Bahnschrift SemiBold SemiCondensed'  # live dashboard type
 
 
@@ -92,6 +96,22 @@ def table(rows, zebra=False):
 
 def r(s):
     return f'<div align=right>{s}</div>'
+
+
+def scrolled(label):
+    """label in a scroll area with a thin scrollbar, for text that outgrows its panel's bottom."""
+    scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)
+    box = QWidget()  # a layout around the label, so the scroll area hears when the text (and its height) changes
+    inner = QVBoxLayout(box)
+    inner.setContentsMargins(0, 0, 0, 0)
+    inner.addWidget(label)
+    inner.addStretch()
+    scroll.setWidget(box)
+    scroll.setStyleSheet('QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }'
+                         ' QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }'
+                         ' QScrollBar::handle:vertical { background: #555; border-radius: 3px; min-height: 20px; }'
+                         ' QScrollBar::add-line, QScrollBar::sub-line { height: 0; }')
+    return scroll
 
 
 def onto_screen(g, screens):
@@ -372,6 +392,23 @@ class TrackMap(Widget):
     title = 'TRACK'
     size_hint = (460, 380)
 
+    def __init__(self, app, key, parent=None):
+        super().__init__(app, key, parent)
+        self.outline = (None, None, None)  # (track, size, pixel ratio, tarmac) -> outline pixmap, outline on screen
+        self.hist, self.hist_of = collections.deque(), None  # (feed time, {car: (x, y)}) for the pit ghost; its State
+        self.blink = False
+        # ~60 fps while cars glide (the feed ticks every 0.5 s). Precise: a coarse timer lands on Windows' 15.6 ms ticks,
+        # alternating 31 and 47 ms frames, which judders
+        QTimer(self, timeout=self.frame, interval=16, timerType=Qt.PreciseTimer).start()
+
+    def frame(self):
+        st = self.app.state
+        if not st or not self.isVisible():
+            return
+        blink = time.monotonic() % 1 < 0.5
+        if st.glide_at() is not None or (blink != self.blink and str(st.d.get('TrackStatus', {}).get('Status')) in BLINK):
+            self.update()
+
     def tick(self):
         st = self.app.state
         self.body.setText('' if st and st.track else '<i>No session. Tray → Live tracker, or Tray → Replay.</i>' if not st
@@ -389,34 +426,61 @@ class TrackMap(Widget):
         p = QPainter(self)
         p.setRenderHint(QPainter.Antialiasing)
         p.setOpacity(self.text_opacity())
-        tint = STATUS_TINT.get(str(st.d.get('TrackStatus', {}).get('Status')))
-        if tint:
+        status = str(st.d.get('TrackStatus', {}).get('Status'))
+        self.blink = time.monotonic() % 1 < 0.5
+        tint = STATUS_TINT.get(status)
+        if tint and (status not in BLINK or self.blink):
             p.setPen(QPen(QColor(tint), 3))
             p.setBrush(Qt.NoBrush)
             radius = 14 if self.docked else 10
             p.drawRoundedRect(QRectF(self.rect()).adjusted(1.5, 1.5, -1.5, -1.5), radius, radius)
 
+        k = max(1.0, min(self.width(), self.height()) / 380)  # markers grow with the map (big in the live dashboard)
         a = np.radians(st.track.rotation)  # same convention as FastF1's rotate()
         rot = np.array([[np.cos(a), np.sin(a)], [-np.sin(a), np.cos(a)]])
         pts = st.track.xy @ rot
         lo, span = pts.min(0), np.ptp(pts, 0) + 1e-9
-        box = QRectF(self.rect()).adjusted(18, 40, -18, -28)
+        m = 8 * k  # half the verge: the outline's centre line fits the box, the verge must stay off the border
+        box = QRectF(self.rect()).adjusted(18 + m, 40 + m, -18 - m, -28 - m)
         sc = min(box.width() / span[0], box.height() / span[1])
         ox, oy = box.left() + (box.width() - span[0] * sc) / 2, box.bottom() - (box.height() - span[1] * sc) / 2
 
         def to(q):
             return QPointF(ox + (q[0] - lo[0]) * sc, oy - (q[1] - lo[1]) * sc)
 
-        path = QPainterPath(to(pts[0]))
-        for q in pts[1:]:
-            path.lineTo(to(q))
-        k = max(1.0, min(self.width(), self.height()) / 380)  # markers grow with the map (big in the live dashboard)
-        p.setBrush(Qt.NoBrush)
-        for colour, width in (('#1C1F27', 16), ('#3A3F4D', 8)):  # dark verge, then the tarmac
-            p.setPen(QPen(QColor(colour), width * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
-            p.drawPath(path)
+        def screen_dir(deg):  # a direction in circuit coordinates (degrees, the circuit API's angle) on screen
+            v = np.array([np.cos(np.radians(deg)), np.sin(np.radians(deg))]) @ rot
+            return QPointF(v[0], -v[1])
+
+        key = (id(st.track), self.width(), self.height(), self.devicePixelRatioF(), TARMAC.get(status))
+        if self.outline[0] != key:  # drawn once per track, size and status colour, then reused every frame
+            dpr = self.devicePixelRatioF()
+            pm = QPixmap(round(self.width() * dpr), round(self.height() * dpr))
+            pm.setDevicePixelRatio(dpr)
+            pm.fill(Qt.transparent)
+            on_screen = [to(q) for q in pts]
+            path = QPainterPath(on_screen[0])
+            for q in on_screen[1:]:
+                path.lineTo(q)
+            o = QPainter(pm)
+            o.setRenderHint(QPainter.Antialiasing)
+            for colour, width in (('#1C1F27', 16), (TARMAC.get(status, '#3A3F4D'), 8)):  # dark verge, then the tarmac
+                o.setPen(QPen(QColor(colour), width * k, Qt.SolidLine, Qt.RoundCap, Qt.RoundJoin))
+                o.drawPath(path)
+            o.setFont(QFont(COND_BOLD, max(5, round(6 * k))))
+            o.setPen(QColor('#6B7080'))
+            for num, x, y, deg in st.track.corners:  # turn numbers, beside the verge on the circuit API's side
+                c = to(np.array([x, y]) @ rot) + screen_dir(deg) * 15 * k
+                c = QPointF(min(max(c.x(), 12 + 10 * k), self.width() - 12 - 10 * k),  # kept inside the border
+                            min(max(c.y(), 34 + 6 * k), self.height() - 24 - 6 * k))
+                o.drawText(QRectF(c - QPointF(10 * k, 6 * k), QSizeF(20 * k, 12 * k)), Qt.AlignCenter, str(num))
+            o.end()
+            self.outline = (key, pm, on_screen)
+        p.drawPixmap(0, 0, self.outline[1])
+        self.draw_yellows(p, st, self.outline[2], k)
 
         cars, gps = st.positions()
+        self.draw_ghost(p, st, cars, to, rot, k)
         dl = st.d.get('DriverList', {})
         order = {d['drv']: d['pos'] for d in st.drivers()}
         f = k * self.app.cfg.get('label_scale', 1.0)  # name size, live dashboard settings
@@ -445,11 +509,106 @@ class TrackMap(Widget):
         w = st.d.get('WeatherData', {})
         if w.get('WindDirection') not in (None, ''):
             self.draw_wind(p, rot, float(w['WindDirection']), w.get('WindSpeed', '?'), k)
+        self.draw_telemetry(p, st, k)
 
         p.setFont(QFont(COND, 9))
         p.setPen(QColor('#3DDC84') if gps else QColor('#fc5'))
         p.drawText(QRectF(self.rect()).adjusted(12, 0, -12, -8), Qt.AlignBottom | Qt.AlignLeft,
                    f"{'GPS' if gps else 'ESTIMATED'} · {getattr(st.feed, 'status', '')} · {st.session()['track']}")
+
+    def focus(self):
+        """Racing number picked in the strategy sim (the live dashboard's), or None."""
+        sim_panel = getattr(self.app, 'sim', None)
+        return sim_panel.selected() if sim_panel else None
+
+    def draw_yellows(self, p, st, on_screen, k):
+        """Marshal sectors under a yellow flag, painted over the tarmac (double yellow wider)."""
+        n = len(on_screen) - 1
+        for sector, flag in st.yellow_sectors().items():
+            if sector not in st.track.marshal:
+                continue
+            i, j = st.track.marshal[sector]
+            idx = list(range(i, j + 1)) if j > i else list(range(i, n)) + list(range(0, j + 1))  # the last one wraps
+            path = QPainterPath(on_screen[idx[0]])
+            for q in idx[1:]:
+                path.lineTo(on_screen[q])
+            p.setPen(QPen(QColor(STATUS_TINT['4']), (12 if flag == 'DOUBLE YELLOW' else 8) * k, Qt.SolidLine, Qt.FlatCap,
+                          Qt.RoundJoin))
+            p.setBrush(Qt.NoBrush)
+            p.drawPath(path)
+
+    def draw_ghost(self, p, st, cars, to, rot, k):
+        """Where the focus car would be if it pitted now: its own spot one pit loss ago (the field moves on at about
+        its pace, SC or not), a ring in its team colour. Races only."""
+        if self.hist_of is not st:
+            self.hist, self.hist_of = collections.deque(), st
+        now = st.now()
+        if self.hist and now < self.hist[-1][0]:  # a replay jumped back
+            self.hist.clear()
+        if not self.hist or now - self.hist[-1][0] >= 0.2:
+            self.hist.append((now, {n: (x, y) for n, x, y, pit in cars}))
+        while self.hist and self.hist[0][0] < now - 90:
+            self.hist.popleft()
+        me = self.focus()
+        if not me or not st.session()['total'] or not hasattr(self.app, 'model'):
+            return
+        under = {'4': 'sc', '6': 'vsc', '7': 'vsc'}.get(str(st.d.get('TrackStatus', {}).get('Status')), 'normal')
+        then = now - st.pit_loss(self.app.model())[under]
+        if then < self.hist[0][0]:
+            return  # not watched long enough yet
+        i = next(i for i, h in enumerate(self.hist) if h[0] >= then)
+        (t0, a), (t1, b) = self.hist[max(i - 1, 0)], self.hist[i]
+        if me not in a or me not in b:
+            return
+        f = (then - t0) / (t1 - t0) if t1 > t0 else 0
+        x, y = np.array(a[me]) * (1 - f) + np.array(b[me]) * f
+        info = st.d.get('DriverList', {}).get(me)
+        colour = info.get('TeamColour', '888888') if isinstance(info, dict) else '888888'
+        pt = to(np.array([x, y]) @ rot)
+        p.setPen(QPen(QColor('#' + colour), 2.5 * k))
+        p.setBrush(Qt.NoBrush)
+        p.drawEllipse(pt, 7 * k, 7 * k)
+        p.setFont(QFont(COND_BOLD, max(5, round(7 * k))))
+        p.setPen(QColor(235, 235, 235))
+        p.drawText(pt + QPointF(9 * k, -6 * k), 'pit')
+
+    def draw_telemetry(self, p, st, k):
+        """Focus car's speed, gear, RPM, throttle and brake (CarData: F1 TV live, or replays) in the bottom-right
+        corner. DRS only when the feed has it (gone from 2026)."""
+        me = self.focus()
+        ch = ((st.d.get('CarData') or {}).get(me) or {}).get('Channels') if me else None
+        if not ch:
+            return
+        k = min(k, 1.6)
+        w, h = 150 * k, 74 * k
+        r = QRectF(self.width() - w - 12, self.height() - h - 30, w, h)
+        p.setPen(QPen(QColor('#2E3240'), 1))
+        p.setBrush(QColor(11, 12, 16, 220))
+        p.drawRoundedRect(r, 8, 8)
+        info = st.d.get('DriverList', {}).get(me)
+        info = info if isinstance(info, dict) else {}
+        x0, y0 = r.left() + 10 * k, r.top() + 8 * k
+        p.setFont(QFont(COND_BOLD, max(6, round(9 * k))))
+        p.setPen(QColor('#' + info.get('TeamColour', '888888')))
+        p.drawText(QPointF(x0, y0 + 10 * k), info.get('Tla') or me)
+        p.setPen(QColor('#ECEDF1'))
+        p.drawText(QRectF(x0, y0, w - 20 * k, 14 * k), Qt.AlignRight | Qt.AlignVCenter,
+                   f"{ch.get('2', 0)} km/h  ·  G{ch.get('3', 0)}")
+        p.setFont(QFont(COND, max(5, round(7 * k))))
+        p.setPen(QColor('#8A8F9C'))
+        drs = ch.get('45')
+        p.drawText(QPointF(x0, y0 + 26 * k), f"{ch.get('0', 0)} rpm" + (
+            '' if drs is None else '  ·  DRS ' + ('OPEN' if drs in (10, 12, 14) else 'ready' if drs == 8 else 'off')))
+        for i, (label, val, col) in enumerate((('THR', ch.get('4', 0), '#3DDC84'), ('BRK', ch.get('5', 0), '#ff3b3b'))):
+            y = y0 + (36 + 14 * i) * k
+            p.setPen(QColor('#8A8F9C'))
+            p.drawText(QPointF(x0, y + 7 * k), label)
+            bar = QRectF(x0 + 26 * k, y, w - 46 * k, 8 * k)
+            p.setPen(Qt.NoPen)
+            p.setBrush(QColor('#20232C'))
+            p.drawRoundedRect(bar, 3, 3)
+            p.setBrush(QColor(col))
+            p.drawRoundedRect(QRectF(bar.topLeft(), QSizeF(bar.width() * min(max(val, 0), 100) / 100, bar.height())), 3, 3)
 
     def draw_wind(self, p, rot, frm, speed, k):
         """Compass in the top-right corner, turned like the map: N, and an arrow pointing where the wind blows.
@@ -577,18 +736,7 @@ class SimPanel(Widget):
         self.lay.insertLayout(3, row_ev)
         self.lay.insertLayout(4, row2)
         self.out = QLabel(wordWrap=True, textFormat=Qt.RichText, alignment=Qt.AlignTop | Qt.AlignLeft)
-        scroll = QScrollArea(widgetResizable=True, frameShape=QFrame.NoFrame)  # the result outgrows the panel's bottom
-        box = QWidget()  # a layout around the label, so the scroll area hears when the text (and its height) changes
-        inner = QVBoxLayout(box)
-        inner.setContentsMargins(0, 0, 0, 0)
-        inner.addWidget(self.out)
-        inner.addStretch()
-        scroll.setWidget(box)
-        scroll.setStyleSheet('QScrollArea, QScrollArea > QWidget > QWidget { background: transparent; }'
-                             ' QScrollBar:vertical { width: 6px; background: transparent; margin: 0; }'
-                             ' QScrollBar::handle:vertical { background: #555; border-radius: 3px; min-height: 20px; }'
-                             ' QScrollBar::add-line, QScrollBar::sub-line { height: 0; }')
-        self.lay.addWidget(scroll, 2)
+        self.lay.addWidget(scrolled(self.out), 2)
         self.setStyleSheet(self.styleSheet() + ' QComboBox, QSpinBox, QPushButton { font: 9pt "Segoe UI"; }')
         self.priors, self.busy = {}, False  # meeting path -> compound priors from that weekend's practice
 
@@ -727,7 +875,17 @@ def seq_at(x, i):
 
 
 def stints(st, drv):
-    return [x for x in live.seq(st.d.get('TimingAppData', {}).get('Lines', {}).get(drv, {}).get('Stints')) if x]
+    """A driver's tyre stints. F1 opens a new one when a car comes through the pits on the same tyres (red flag:
+    TyresNotChanged '1'); those carry on the stint before."""
+    out = []
+    for x in live.seq(st.d.get('TimingAppData', {}).get('Lines', {}).get(drv, {}).get('Stints')):
+        if not x:
+            continue
+        if out and str(x.get('TyresNotChanged')) == '1':
+            out[-1] = {**out[-1], 'TotalLaps': x.get('TotalLaps', out[-1].get('TotalLaps'))}
+        else:
+            out.append(x)
+    return out
 
 
 class SectorTower(Widget):
@@ -806,21 +964,22 @@ class StintPanel(Widget):
         for x in st.stops():
             stops.setdefault(x['drv'], []).append(x)
         grey = "<span style='color:#777'>{}</span>".format
-        rows = [['', '', '', grey('STINTS: compound + laps on the set, * = used set'), r(grey('STOPS')), r(grey('LAST STOP'))]]
+        rows = [['', '', '', grey('STINTS: laps on the set, * = used set'), r(grey('STOPS')), r(grey('LAST STOP'))]]
         for d in ds:
             cells, used_pct = [], 0.0
             for x in stints(st, d['drv']):
                 n = max(int(x.get('TotalLaps') or 0) - int(x.get('StartLaps') or 0), 0)  # TotalLaps = tyre age
                 if not n:
                     continue
-                letter, col = tyre_style(x.get('Compound'), st)
+                col = tyre_style(x.get('Compound'), st)[1]
                 pct = 100 * n / total
                 used_pct += pct
-                cells.append(f"<td width='{pct:.1f}%' bgcolor='{col}' align=center><span style='color:#000;font-size:7pt'>"
-                             f"<b>{letter}</b>{n}{'' if str(x.get('New')).lower() == 'true' else '*'}</span></td>")
+                ink = '#fff' if x.get('Compound') == 'WET' else '#000'  # black is hard to read on the wet blue
+                cells.append(f"<td width='{pct:.1f}%' bgcolor='{col}' align=center><span style='color:{ink};font-size:9pt'>"
+                             f"<b>{n}{'' if str(x.get('New')).lower() == 'true' else '*'}</b></span></td>")
             if used_pct < 99.5:
                 cells.append(f"<td width='{100 - used_pct:.1f}%'></td>")
-            bar = "<table width=100% cellspacing=1 cellpadding=0><tr>" + ''.join(cells) + "</tr></table>"
+            bar = "<table width=100% cellspacing=1 cellpadding=2><tr>" + ''.join(cells) + "</tr></table>"
             mine = stops.get(d['drv'], [])
             last = mine[-1].get('stationary') if mine else None
             rows.append([d['pos'] if d['pos'] < 99 else '', f"#{d['colour']}",
@@ -831,8 +990,30 @@ class StintPanel(Widget):
 
 
 class RaceControl(Widget):
-    """Race control messages, newest first, with the flag colour; weather on top."""
+    """Race control messages and team radio clips, newest first, with the flag colour; weather on top."""
     title = 'RACE CONTROL'
+    player = None  # one QMediaPlayer for every panel: a new clip stops the last
+
+    def __init__(self, app, key, parent=None):
+        super().__init__(app, key, parent)
+        self.lay.removeWidget(self.body)
+        self.body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)  # its full height, for the scroll area
+        self.body.linkActivated.connect(self.play)
+        self.lay.addWidget(scrolled(self.body), 1)
+
+    @classmethod
+    def play(cls, url):
+        """Plays a clip; clicking the one playing stops it."""
+        from PySide6.QtCore import QUrl
+        from PySide6.QtMultimedia import QAudioOutput, QMediaPlayer
+        if cls.player is None:
+            cls.player = QMediaPlayer()
+            cls.player.setAudioOutput(QAudioOutput(cls.player))
+        if cls.player.source() == QUrl(url) and cls.player.playbackState() == QMediaPlayer.PlayingState:
+            cls.player.stop()
+            return
+        cls.player.setSource(QUrl(url))
+        cls.player.play()
 
     def tick(self):
         if _need_feed(self):
@@ -843,15 +1024,32 @@ class RaceControl(Widget):
                    f" · wind {w.get('WindSpeed', '?')} m/s · "
                    + ("<b style='color:#2f7cff'>RAIN</b>" if str(w.get('Rainfall')) == '1' else 'dry')) if w else ''
         msgs = [m for m in live.seq(st.d.get('RaceControlMessages', {}).get('Messages')) if isinstance(m, dict)]
-        rows = []
-        for m in reversed(msgs[-40:]):
+        base = data.ARCHIVE + st.d.get('SessionInfo', {}).get('Path', '')
+        dl = st.d.get('DriverList', {})
+        for c in live.seq(st.d.get('TeamRadio', {}).get('Captures')):
+            if isinstance(c, dict) and c.get('Path'):
+                who = (dl.get(c.get('RacingNumber')) or {}).get('Tla') or c.get('RacingNumber', '?')
+                msgs.append({'Utc': c.get('Utc', ''), 'Radio': base + c['Path'], 'Message': f'{who} radio'})
+        msgs.sort(key=lambda m: m.get('Utc', ''))  # ISO times sort as text
+        msgs = msgs[-60:]
+        said = {m['Radio']: radio.text(m['Radio']) for m in msgs if m.get('Radio')} if radio.available() else {}  # asked oldest
+        rows = []  # first: the newest clip is transcribed first
+        for m in reversed(msgs):
             when = f"L{m['Lap']}" if m.get('Lap') else ''
             try:
                 when += ' ' + datetime.fromisoformat(m['Utc']).replace(tzinfo=timezone.utc).astimezone().strftime('%H:%M')
             except (KeyError, ValueError):
                 pass
             col = FLAG.get(m.get('Flag')) or ('#ffd400' if m.get('Category') == 'SafetyCar' else '#444444')
-            rows.append([f"<span style='color:#888'>{when.strip()}</span>", col, html.escape(m.get('Message', ''))])
+            text = html.escape(m.get('Message', ''))
+            if m.get('Radio'):
+                col, text = '#7cc4ff', f"<a href='{html.escape(m['Radio'])}' style='color:#7cc4ff; text-decoration:none'>▶ {text}</a>"
+                if m['Radio'] in said:
+                    t = said[m['Radio']]
+                    text += ("<br><span style='color:#666'><i>transcribing…</i></span>" if t is None else
+                             f"<br><span style='color:#bbb'>“{html.escape(t)}”</span>" if t else
+                             "<br><span style='color:#666'><i>(nothing clear)</i></span>")
+            rows.append([f"<span style='color:#888'>{when.strip()}</span>", col, text])
         self.body.setText(f"<span style='color:#999'>{weather}</span>" + (table(rows, self.docked) if rows else '<br><i>no messages yet</i>'))
 
 

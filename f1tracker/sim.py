@@ -35,7 +35,10 @@ MODEL = {  # ponytail: hand-tuned defaults. Every value is a calibration knob (c
     'pit_neutral_sd': None,   # {'sc', 'vsc'}: spread of a factor shared by all cars in one SC / VSC (all pit or all stay out)
     'min_gap': 0.4,
     'noise_min': 0.25,
-    'prior_weight': 3.0, 'half_life_laps': 4, 'trend_stiffness': 300,      # pseudo-laps pulling compound params towards the prior
+    'prior_weight': 3.0,      # pseudo-laps pulling compound params towards the prior
+    'half_life_laps': 8, 'trend_stiffness': 30,  # leave-one-race-out on 2025 and 2026: better order and lap times than 4 / 300
+    'pace_sd': 0.0,           # s/lap: each run draws every driver's true pace this far from the fit (it is an estimate);
+                              # calibrate.py fits it per era so 80 % of real finishes land in the sim's 80 % range
     'prior': {'SOFT': (-0.5, 0.10), 'MEDIUM': (0.0, 0.06), 'HARD': (0.4, 0.04),  # (offset vs MEDIUM s, deg s/lap)
               'INTERMEDIATE': (6.0, 0.05), 'WET': (10.0, 0.05)},
     'life': {'SOFT': 18, 'MEDIUM': 28, 'HARD': 40, 'INTERMEDIATE': 99, 'WET': 99},
@@ -150,8 +153,12 @@ def fit(laps, total, m=MODEL):
     p = lsq_linear(np.array(rows), np.array(y), bounds=(lo, np.inf)).x
     res = np.array([l['t'] for l in L]) - np.array([predict_row(l, drvs, cmps, p) for l in L])
     sig = {d: max(m['noise_min'], float(np.std(res[[l['drv'] == d for l in L]]))) for d in drvs}
+    # no clean laps yet (a start behind the SC, a wet start): the field's level from any laps, SC laps scaled to green
+    seen = [(l['t'] / (m['sc_lap_factor'] if l['sc'] else 1)) - p[D + cmps.index(l['cmp'])] - p[-1] * l['lap']
+            for l in laps if l['t'] and not l['pit'] and l['lap'] > 1 and l['cmp'] in cmps]
     return {'base': dict(zip(drvs, p[:D])), 'off': dict(zip(cmps, p[D:D + C])), 'deg': dict(zip(cmps, p[D + C:D + 2 * C])),
-            'trend': float(p[-1]), 'sigma': sig, 'total': total, 'm': m, 'n': len(L)}
+            'trend': float(p[-1]), 'sigma': sig, 'total': total, 'm': m, 'n': len(L),
+            'level': float(np.median(seen)) if seen else 90.0}
 
 
 def predict_row(l, drvs, cmps, p):
@@ -161,9 +168,10 @@ def predict_row(l, drvs, cmps, p):
 
 
 def _base(model, drv):
-    """Drivers without clean laps yet get the field average plus half a second."""
+    """Drivers without clean laps yet get the field average plus half a second (no clean laps at all: the level
+    of whatever laps there are)."""
     b = model['base']
-    return b[drv] if drv in b else (np.mean(list(b.values())) + 0.5 if b else 90.0)
+    return b[drv] if drv in b else (np.mean(list(b.values())) + 0.5 if b else model.get('level', 90.0))
 
 
 def predict(model, drv, lap, cmp, age):
@@ -350,7 +358,7 @@ def simulate(drivers, lap, model, plan=None, runs=500, seed=0, pit_loss=None, la
     loss = pit_loss or {'normal': m['pit_loss'], 'sc': m['pit_loss'] * 0.6}
     lap_s = lap_s or np.median([predict(model, d['drv'], lap, 'MEDIUM', 0) for d in ds])
     ci = lambda c: cmps.index(c) if c in cmps else cmps.index('MEDIUM')
-    base = np.array([_base(model, d['drv']) for d in ds])
+    base = np.array([_base(model, d['drv']) for d in ds]) + rng.normal(0, m.get('pace_sd', 0.0), (R, D))  # (R, D)
     off = np.array([model['off'].get(c, 0) for c in cmps])
     deg = np.maximum([model['deg'].get(c, 0.05) for c in cmps], 0)  # tyres never get faster with age
     life = np.array([m['life'].get(c, 30) for c in cmps])
