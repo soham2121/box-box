@@ -67,7 +67,8 @@ VIEW = {'label_scale': 1.0, 'follow': None, 'delay': 0, 'replay_speed': 10}  # S
 
 
 class Settings(QDialog):
-    """Applies every change at once, no OK button needed."""
+    """Applies every change at once, except the delay: that waits for Save (typing 45 over 40 would go through 4 s,
+    and dropping the delay lets out held data that can't be held back again: spoilers)."""
 
     def __init__(self, dash):
         super().__init__(dash, windowTitle='Live settings')
@@ -76,9 +77,14 @@ class Settings(QDialog):
         size = QSpinBox(minimum=50, maximum=300, singleStep=10, suffix=' %', value=round(dash.cfg['label_scale'] * 100))
         size.valueChanged.connect(lambda v: dash.set_view('label_scale', v / 100))
         form.addRow('Driver names on the map', size)
-        delay = QSpinBox(minimum=0, maximum=600, suffix=' s', value=dash.cfg['delay'])
-        delay.valueChanged.connect(lambda v: dash.set_view('delay', v))
-        form.addRow('Delay live data', delay)
+        self.delay = QSpinBox(minimum=0, maximum=600, suffix=' s', value=dash.cfg['delay'])
+        self.save_delay = QPushButton('Save', enabled=False)
+        self.delay.valueChanged.connect(lambda v: self.save_delay.setEnabled(v != dash.cfg['delay']))
+        self.save_delay.clicked.connect(lambda: (dash.set_view('delay', self.delay.value()), self.save_delay.setEnabled(False)))
+        row = QHBoxLayout()
+        row.addWidget(self.delay, 1)
+        row.addWidget(self.save_delay)
+        form.addRow('Delay live data', row)
         hint = QLabel('Live timing runs ahead of the F1 TV video. Set the delay so overtakes show on the map when you '
                       'see them on the stream (no spoilers). Live only, not replays.', wordWrap=True)
         hint.setStyleSheet('color: #888')
@@ -102,6 +108,7 @@ class Settings(QDialog):
     def fill(self):
         """Drivers of the session on screen (plus any picked earlier that aren't in it)."""
         st, follow = self.dash.state, self.dash.cfg['follow']
+        self.delay.setValue(self.dash.cfg['delay'])  # drops a value typed but never saved
         dl = {n: i for n, i in (st.d.get('DriverList', {}) if st else {}).items() if isinstance(i, dict) and i.get('Tla')}
         rows = sorted((i['Tla'], i.get('FullName', '')) for i in dl.values())
         rows += [(c, '') for c in follow or () if c not in {r[0] for r in rows}]

@@ -75,9 +75,9 @@ One window for the whole weekend, in a dark theme with F1-style condensed type (
   - The current lap's S1/S2/S3: mini-sector squares (yellow, green = personal best, purple = overall best, grey = pit lane), and each sector time once done.
   - Last lap, tyre, laps.
   - Qualifying: the header shows Q1/Q2/Q3 (SQ in sprint qualifying) and the time left. Best and gap are for the current part, drop-zone positions are red, knocked-out drivers are greyed.
-- **Tyre stints:** each driver's sets as coloured bars across the race distance (`M24` = medium for 24 laps, `*` = used set), stops, and the last stop's stationary time (with F1 TV).
+- **Tyre stints:** each driver's sets as bars in the compound's colour across the race distance, with the laps on that set (`24`, `*` = used set), stops, and the last stop's stationary time (with F1 TV). A car that comes through the pits on the same tyres (red flag) keeps one stint.
 - **Tyres:** current compound and its age, new or used, sets used so far.
-- **Race control:** messages newest first with lap, time and flag colour; weather on top.
+- **Race control** (scrolls): messages and team radio newest first, with lap, time and flag colour; weather on top. Click **▶ VER radio** to play a clip (again to stop). Each clip gets a transcript underneath, made on your PC by Whisper (`faster-whisper`, `small.en`: ~250 MB downloaded the first time, then about 2 s per clip in the background, newest first). Transcripts are cached in `%APPDATA%\f1tracker\radio.json`. Radio is noisy, so expect the odd wrong word.
 
 Tab choices and splitter sizes are remembered. The toolbar's status shows as chips: the feed (green dot while live), session, lap, and the track status in its flag colour (yellow, SC, VSC, red). The timing tower marks the session's fastest lap in purple, and the sim shows its four likeliest finishes as a bar.
 
@@ -99,6 +99,11 @@ The map also shows:
 - **Cars out of the session** leave the map (F1's `Stopped` flag). A car that gets going again comes back.
 - **Safety car**: a yellow `SC` dot, only while it's out on track. F1 sends it as car 241, 242 or 243 (it varies by race).
 - **Wind compass** (top right): `N` turned with the map, plus an arrow pointing where the wind blows, and `wind 1.8 m/s from E`.
+- **Track status**: under an SC or VSC the track turns yellow, under a red flag red. The border is yellow (SC) or red (red flag), and flashes orange under a VSC.
+- **Turn numbers** beside each corner, and **local yellow flags**: the marshal sector race control waves a yellow in turns yellow on the map (wider for a double yellow) until it's cleared. Both come from MultiViewer's circuit data (the newest year it has; none for circuits it doesn't know).
+- **Pit ghost**: a ring in team colour labelled `pit` where the driver picked in the strategy sim would be on track if they pitted now (their own spot one pit loss ago; SC/VSC pit loss while one is out). Races only.
+- **Telemetry** (bottom right) for the same driver: speed, gear, RPM, throttle and brake (live with F1 TV, and replays). DRS only in seasons that had it (until 2025).
+- **Smooth cars**: with a live delay of 2 s or more, and in replays, cars glide along a curve fitted to the GPS samples instead of jumping once a second.
 - **Sign in to F1 TV…**: opens FastF1's login page. It needs the **FastF1 Companion** browser extension (Chrome/Edge/Brave/Firefox; the page links it). Log in at formula1.com, then click **Connect FastF1** on the page the extension opens. The app waits up to 30 min, then reconnects with your account (real GPS positions) and keeps the laps logged so far.
 
 The window remembers its size and splitter positions (`%APPDATA%\f1tracker\dashboard.json`). It runs separately from the tray widgets, so you can close the standings during a race. Only one dashboard runs at a time: launching it again brings the open window to the front.
@@ -135,7 +140,8 @@ Restart the app after editing. Defaults and their meanings are in `MODEL` at the
 
 ### What the sim models
 
-- **Lap times**: fitted per driver, compound offset + wear per lap + one trend for fuel burn and track evolution.
+- **Lap times**: fitted per driver, compound offset + wear per lap + one trend for fuel burn and track evolution, recent laps weighing more. Before any green lap (a start behind the SC) the level comes from the laps run so far.
+- **Pace uncertainty**: the fit is an estimate, so each simulated race draws every driver's true pace around it (`pace_sd`, fitted per era so the real finish lands in the sim's 80 % range 80 % of the time).
 - **Tyre choice per car**: at each stop, the dry compound that's quickest to the flag (an extra stop if it won't last), and one the car hasn't used while it still owes the two-compound rule. Sprints have free tyre choice, so no forced stop.
 - **Weather**: the track stays as it is now (what most cars are on) unless you pick **rain (inters) from lap** or **track dries from lap** under the pit row. Cars on the wrong tyres stop when the time they'd lose to the flag beats the pit loss. Slicks on a wet track lose `slick_wet_s` (6 s) a lap. No forecast is assumed.
 - **Safety car / VSC / red flag**: random, at the rates seen in that era's races, and one that's out right now is always used: the sim starts under it with the laps it likely has left (an SC "in this lap" has one). Pick **safety car / VSC / red flag on lap N** under the weather row to see the best window and tyre if one comes then.
@@ -151,7 +157,7 @@ Restart the app after editing. Defaults and their meanings are in `MODEL` at the
 
 Each regulation era is a different car, so the sim is calibrated per era and a session uses its own era's numbers: **2018–2021** (wide cars, DRS), **2022–2025** (ground effect, DRS), **2026–** (new power units, active aero, Overtake Mode). Per-season regulation facts sit on top: minimum mass (733 kg 2018, 743 2019, 746 2020, 752 2021, 798 2022–24, 800 2025, 768 2026) and race start fuel (105 kg limit in 2018, about 100 kg used 2019–25, about 70 kg in 2026).
 
-`f1tracker/calibration.json` holds, per era: SC/VSC rates and lengths, SC/VSC lap times, overtaking odds, dry tyre offsets and wear, and tyre life (90th percentile stint at the in-lap). Config overrides still win over it. To refit:
+`f1tracker/calibration.json` holds, per era: SC/VSC rates and lengths, SC/VSC lap times, overtaking odds, dry tyre offsets and wear, tyre life (90th percentile stint at the in-lap) and pace uncertainty. Config overrides still win over it. To refit:
 
 ```
 .venv\Scripts\python -m f1tracker.calibrate --write          # every era (about an hour the first time: downloads ~220 races)
@@ -160,11 +166,13 @@ Each regulation era is a different car, so the sim is calibrated per era and a s
 
 It prints a backtest per race: lap-time error, finishing-position error, rank correlation, log score of the real result and "pit now" rejoin error, before and after calibration, each race left out of its own fit. Sim started at 30/50/70 % distance:
 
-| Era | races | position error before → after | log score before → after |
-|---|---|---|---|
-| 2018–2021 | 83 | 1.65 → 1.60 | −2.73 → −2.22 |
-| 2022–2025 | 113 | 1.66 → 1.57 | −2.68 → −2.14 |
-| 2026– | 21 | 1.32 → 1.24 | −2.40 → −1.87 |
+| Era | races | position error before → after | log score before → after | real finish in the 80 % range |
+|---|---|---|---|---|
+| 2018–2021 | 83 | 1.60 → 1.56 | −2.69 → −1.98 | 54 % → 79 % |
+| 2022–2025 | 113 | 1.61 → 1.53 | −2.62 → −1.99 | 57 % → 80 % |
+| 2026– | 22 | 1.26 → 1.23 | −2.35 → −1.78 | 61 % → 80 % |
+
+"Before" is the sim's defaults with no calibration. Refitted 2026-10-10 after two changes kept only because they scored better out of sample on both 2025 and 2026: pace uncertainty (the old fit's 80 % ranges held the real finish only 55–60 % of the time) and lap-time fitting that weights recent laps longer (half-life 8 laps, was 4) with a freer trend for track evolution.
 
 Who pits under an SC/VSC is a fitted chance, as in real races, so the spread of outcomes is more realistic while the average position is a few hundredths of a place less sharp than a fixed "worn tyres pit" rule. Checked on seasons the fit never saw (`scripts/validate_pit_neutral.py`, results in docs/CHECKLIST.md): the fitted odds predict pit/no-pit 2–2.5× better (Brier) and give a better log score in every era; the shared per-SC factor reproduces how clustered real SC stops are.
 

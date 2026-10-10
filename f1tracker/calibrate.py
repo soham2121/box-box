@@ -16,7 +16,10 @@ Fitted per era from its races:
                                                  per-SC/VSC factor: teams mostly all pit or all stay out
   prior                                          dry compound offset vs MEDIUM and wear per lap (median race fit)
   life                                           tyre age the longest stints reach (90th percentile at the in-lap)
-Every number in the backtest table is out of sample: the race being scored is left out of the fit.
+  pace_sd                                        spread of each driver's true pace around the fit, set so the real
+                                                 finish lands inside the sim's 80 % range 80 % of the time
+Every number in the backtest table is out of sample: the race being scored is left out of the fit (pace_sd, one
+number fitted to the spread over all the era's races, is the exception).
 """
 import json
 import sys
@@ -329,6 +332,17 @@ def rejoin_errors(race, lap_s=True):
     return out
 
 
+def fit_pace_sd(rs, cal, grid=(0.0, 0.1, 0.2, 0.3, 0.4, 0.5), target=0.8):
+    """pace_sd whose 80 % ranges hold the real finish 80 % of the time over these races (coverage grows with it:
+    interpolated between the grid points either side)."""
+    cover = [float(np.nanmean([score(r, {**r['m0'], **cal, 'pace_sd': g}, runs=200)['cover80'] for r in rs])) for g in grid]
+    print('pace_sd coverage:', dict(zip(grid, np.round(cover, 3))))
+    for (g0, c0), (g1, c1) in zip(zip(grid, cover), zip(grid[1:], cover[1:])):
+        if c0 <= target <= c1:
+            return round(g0 + (g1 - g0) * (target - c0) / (c1 - c0 or 1), 3)
+    return grid[0] if cover[0] > target else grid[-1]
+
+
 def fit_era(name, years):
     """Load the era's races, fit it, backtest leave-one-out. Returns (knobs, labels, rows) or None."""
     rs = []
@@ -345,10 +359,11 @@ def fit_era(name, years):
         return None
     sums = [summary(r) for r in rs]
     cal = calibrate(sums)
+    cal['pace_sd'] = fit_pace_sd(rs, cal)
     print(f'\n== era {name}: {len(rs)} races/sprints from {years[0]}-{years[-1]}\n', json.dumps(cal))
     rows = []
     for i, r in enumerate(rs):
-        loo = calibrate(sums[:i] + sums[i + 1:])
+        loo = {**calibrate(sums[:i] + sums[i + 1:]), 'pace_sd': cal['pace_sd']}
         base, new = score(r, r['m0']), score(r, {**r['m0'], **loo})
         rows.append((r['label'], base, new))
         print(f"{r['label']:<38} " + '  '.join(f"{k} {base[k]:.3f}->{new[k]:.3f}" for k in base))

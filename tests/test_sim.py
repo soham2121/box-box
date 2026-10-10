@@ -122,3 +122,20 @@ def test_pit_neutral_fit_finds_the_herd_effect():
         eps.append({'kind': 'sc', 'x': x, 'y': list(rng.random(20) < 1 / (1 + np.exp(-z)))})
     w, sd = calibrate.fit_pit_neutral(eps)
     assert sd['sc'] == pytest.approx(2.0, abs=0.5) and w[1] == pytest.approx(2.0, abs=0.6)
+
+
+def test_pace_uncertainty_widens_the_spread_of_finishes():
+    """A 3 s lead over 10 laps: certain with an exact fit, doubtful once each run draws the true pace (pace_sd)."""
+    cars = [car('A', 1, ''), car('B', 2, '+3.0', interval='+3.0')]
+    pos = lambda sd: sim.simulate(cars, 0, model(two_compounds=False, **{'pass': [30.0, 0.0, 0.0], 'pace_sd': sd}),
+                                  runs=400, pit_loss={'normal': 22.0})['pos'][:, 0]
+    assert (pos(0.0) == 1).all()
+    assert 0.2 < (pos(0.5) == 2).mean() < 0.8
+
+
+def test_no_clean_laps_yet_takes_the_level_of_the_laps_seen():
+    """A start behind the SC: no green laps, so lap times come from the SC laps scaled back, not a fixed 90 s."""
+    laps = [{'drv': d, 'lap': n, 't': 150.0, 'pit': False, 'sc': True, 'cmp': 'INTERMEDIATE', 'age': n, 'int': 2.0,
+             'pos': i + 1, 'gap': 2.0 * i} for n in range(2, 6) for i, d in enumerate('AB')]
+    f = sim.fit(laps, 20, sim.DEFAULTS)
+    assert abs(sim.predict(f, 'A', 6, 'INTERMEDIATE', 6) - 150.0 / sim.DEFAULTS['sc_lap_factor']) < 2

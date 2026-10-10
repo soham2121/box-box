@@ -22,6 +22,15 @@ NEUTRALISED = {'4', '5', '6', '7'}  # TrackStatus: SC, red flag, VSC, VSC ending
 # Position.z also carries the safety car as 241, 242 or 243 (which one varies by race; 2025-26 archive: each only moves
 # while TrackStatus is SC). Parked in the pit lane otherwise, so it's shown only while it moves.
 SAFETY_CARS = {'241', '242', '243'}
+# GPS comes about once a second, 4-5 samples per message, and the samples' timestamps don't match their positions
+# closely (0.24 s for 2 m, then 0.34 s for 16 m), so a straight line between samples jerks. Cars glide along a curve
+# fitted to the samples within GLIDE_W s either side of the moment drawn (Bahrain 2026: within 7 m of the raw path),
+# when that window is already in hand: live with a delay of at least SMOOTH_DELAY s, or a replay. The moment drawn is
+# GLIDE_BACK s (+ the 0.5 s between pumps, in feed time) behind the newest data: the window, the longest gap between
+# messages (1.3 s) and some margin. Live with a smaller delay than that, the map runs behind the timing by the rest.
+SMOOTH_DELAY = 2
+GLIDE_W = 1.25
+GLIDE_BACK = 2.75
 
 
 def merge(base, upd):
@@ -59,6 +68,15 @@ def unz(s):
     return json.loads(zlib.decompress(base64.b64decode(s), -zlib.MAX_WBITS))
 
 
+def clock(sample):
+    """Seconds into the day of a Position sample's Timestamp ('2026-10-04T06:26:25.1743756Z'), None without one."""
+    try:
+        h, m, sec = sample['Timestamp'][11:].rstrip('Z').split(':')
+        return int(h) * 3600 + int(m) * 60 + float(sec)
+    except (KeyError, TypeError, ValueError):
+        return None
+
+
 class Track:
     def __init__(self, info):
         xy = np.c_[info['x'], info['y']].astype(float)
@@ -67,8 +85,29 @@ class Track:
         self.ms = info.get('miniSectorsIndexes') or []
         self.rotation = info.get('rotation', 0)
         self.pit_loss = {k: float(v) for k, v in (info.get('pitLoss') or {}).items()}
-        self.corners = [(c['number'], c['trackPosition']['x'], c['trackPosition']['y']) for c in info.get('corners', [])]
         self.learned = None  # {'sectors', 'profile'} from GPS at this circuit (learn_positions), for estimated positions
+        self.landmarks(info)
+
+    def landmarks(self, info):
+        """Corners [(number, x, y, label angle in degrees)] and marshal sectors {number: (outline index where it
+        starts, where the next one starts)} from a circuit API payload (another year's works too: same Position.z
+        frame). The last sector ends where the first starts, so its end index is the smaller one."""
+        self.corners = [(c['number'], c['trackPosition']['x'], c['trackPosition']['y'], c.get('angle', 0))
+                        for c in info.get('corners') or []]
+        ms = sorted(info.get('marshalSectors') or [], key=lambda m: m['number'])
+        idx = self.snap([(m['trackPosition']['x'], m['trackPosition']['y']) for m in ms])
+        self.marshal = {m['number']: (i, idx[(k + 1) % len(idx)]) for k, (m, i) in enumerate(zip(ms, idx))}
+
+    def snap(self, pts):
+        """Outline index nearest each point, in lap order: each searches only the half lap after the one before, so a
+        point where the track crosses itself (Suzuka) lands on the right branch."""
+        n, out = len(self.xy) - 1, []
+        for x, y in pts:
+            d = np.hypot(self.xy[:-1, 0] - x, self.xy[:-1, 1] - y)
+            if out:
+                d = np.where((np.arange(n) - out[-1]) % n < n // 2, d, np.inf)
+            out.append(int(np.argmin(d)))
+        return out
 
     def at(self, f):
         d = (f % 1) * self.s[-1]
@@ -110,6 +149,7 @@ class State:
         self.laps = []         # completed laps, see _lap()
         self.gps = {}          # racing number -> (x, y), only when Position.z flows (F1 TV / replay)
         self.gps_t = 0
+        self.trail = {}        # racing number -> deque of (feed time, x, y): GPS samples, ahead of .gps while held back
         self.sc_moved = {}     # safety car number -> feed time it last moved
         self.clock_t = 0       # feed time the last ExtrapolatedClock message arrived
         self.delay = 0         # s to hold live data back, to match a video stream that runs behind live timing
@@ -125,6 +165,7 @@ class State:
         self.pit_typical = None  # median pit loss over the circuit catalogue
         self.neutral = None    # [SC / VSC / RED, lap it began, ending] while one is out (the sim starts from it)
         self._pit = (None, None)
+        self._yellow = (None, {})  # (message count, yellow_sectors())
 
     def pump(self, budget=0.4):
         """Apply queued messages for up to `budget` s (a replay jump queues tens of thousands at once).
@@ -132,9 +173,15 @@ class State:
         end = time.monotonic() + budget
         while True:
             try:
-                self.held.append(self.q.get_nowait())
+                m = self.q.get_nowait()
             except queue.Empty:
                 break
+            if m[0] == RESET:
+                self.trail = {}
+            elif m[0] in ('Position', 'Position.z'):  # unpacked once, here, so the trail runs ahead of the delay
+                m = ('Position', unz(m[1]) if m[0].endswith('.z') else m[1], m[2])
+                self.add_trail(m[1], m[2])
+            self.held.append(m)
         now = self.now()
         while self.held and time.monotonic() < end:
             if self.lag() and self.held[0][2] > now:
@@ -147,12 +194,65 @@ class State:
 
     def reset(self):
         """Back to an empty session (a replay jumping backwards); keeps the queue, feed, track and pit-loss sources."""
-        keep = {k: getattr(self, k) for k in ('q', 'held', 'delay', 'feed', 'track', 'pit_known', 'pit_weekend', 'pit_typical')}
+        keep = {k: getattr(self, k) for k in ('q', 'held', 'delay', 'feed', 'track', 'pit_known', 'pit_weekend', 'pit_typical',
+                                              'trail')}  # trail: cleared by pump() when it queues the reset
         self.__init__()
         self.__dict__.update(keep)
 
     def now(self):
         return self.feed.now() - self.lag() if self.feed else self.t
+
+    def glide_at(self):
+        """Feed time the map draws GPS cars at, between fixes; None: each car jumps to its latest fix."""
+        if not self.feed or isinstance(self.feed, LiveFeed) and self.lag() < SMOOTH_DELAY:
+            return None
+        return self.feed.now() - max(self.lag(), self.glide_back())
+
+    def glide_back(self):
+        return GLIDE_BACK + 0.6 * max(getattr(self.feed, 'speed', 1), 1)
+
+    def add_trail(self, x, t):
+        """GPS samples of one Position message into .trail. The message time t is its last sample's; the others sit
+        before it as far apart as their own timestamps."""
+        samples = x.get('Position') or []
+        end = clock(samples[-1]) if samples else None
+        for s in samples:
+            at = t - (end - clock(s)) % 86400 if end is not None and clock(s) is not None else t  # % : past midnight
+            for n, e in s['Entries'].items():
+                if e.get('X') or e.get('Y'):
+                    self.trail.setdefault(n, collections.deque()).append((at, e['X'], e['Y']))
+        old = self.now() - self.glide_back() - GLIDE_W - 2  # keeps memory bounded when nothing draws them (no smoothing)
+        for tr in self.trail.values():
+            while len(tr) > 1 and tr[1][0] <= old:
+                tr.popleft()
+
+    def glide(self, n, at):
+        """(x, y) of car n at feed time `at`: a quadratic in time fitted to its samples within GLIDE_W s either side,
+        the nearer ones weighing more (tricube, so a sample fades in and out of the window without a jump)."""
+        tr = self.trail.get(n)
+        if not tr:
+            return None
+        while len(tr) > 1 and tr[1][0] <= at - GLIDE_W:
+            tr.popleft()
+        win = []
+        for smp in tr:  # the trail runs far ahead with a long delay: only walk the window
+            if smp[0] >= at + GLIDE_W:
+                break
+            win.append(smp)
+        # no sample on one side (seek, signal lost, not here yet): hold the nearest
+        if not win or win[0][0] > at:
+            return tr[0][1:]
+        if win[-1][0] <= at:
+            return win[-1][1:]
+        S = np.array(win, dtype=float)
+        d = (S[:, 0] - at) / GLIDE_W
+        w = np.sqrt(np.clip(1 - np.abs(d) ** 3, 0, 1) ** 3)
+        if (w > 0).sum() < 4:  # too few for a curve: straight line between the two either side
+            i = int(np.searchsorted(S[:, 0], at, side='right'))
+            k = (at - S[i - 1, 0]) / (S[i, 0] - S[i - 1, 0])
+            return tuple(S[i - 1, 1:] + k * (S[i, 1:] - S[i - 1, 1:]))
+        c = np.linalg.lstsq(np.c_[np.ones_like(d), d, d * d] * w[:, None], S[:, 1:] * w[:, None], rcond=None)[0]
+        return float(c[0, 0]), float(c[0, 1])
 
     def apply(self, topic, x, t):
         if topic == RESET:
@@ -272,7 +372,9 @@ class State:
         # sent) and GPS keeps sending its last spot, which would leave a dot stuck on track
         gone = lambda n: lines.get(n, {}).get('Retired') or lines.get(n, {}).get('Stopped')
         if self.gps and self.now() - self.gps_t < 10 * max(getattr(self.feed, 'speed', 1), 1):  # replays: feed time runs faster
-            return [(n, x, y, bool(lines.get(n, {}).get('InPit'))) for n, (x, y) in self.gps.items()
+            at = self.glide_at()
+            return [(n, *((at is not None and self.glide(n, at)) or xy), bool(lines.get(n, {}).get('InPit')))
+                    for n, xy in self.gps.items()
                     if not gone(n) and (n not in SAFETY_CARS or self.gps_t - self.sc_moved.get(n, -1e9) < 30)], True
         if not self.track:
             return [], False
@@ -341,6 +443,24 @@ class State:
         typical = m['sc_laps'] if kind == 'SC' else m['vsc_laps']
         return (kind, max(1, round(typical) - (self.session()['lap'] - since)))
 
+    def yellow_sectors(self):
+        """{marshal sector: 'YELLOW' / 'DOUBLE YELLOW'} waved right now, from race control: a sector's CLEAR ends it,
+        a track-wide GREEN / CLEAR / CHEQUERED ends them all."""
+        msgs = [m for m in seq(self.d.get('RaceControlMessages', {}).get('Messages')) if isinstance(m, dict)]
+        if self._yellow[0] != len(msgs):
+            out = {}
+            for m in msgs:
+                flag, scope = m.get('Flag'), m.get('Scope')
+                if scope == 'Sector' and m.get('Sector'):
+                    if flag in ('YELLOW', 'DOUBLE YELLOW'):
+                        out[int(m['Sector'])] = flag
+                    elif flag == 'CLEAR':
+                        out.pop(int(m['Sector']), None)
+                elif scope == 'Track' and flag in ('GREEN', 'CLEAR', 'CHEQUERED'):
+                    out = {}
+            self._yellow = (len(msgs), out)
+        return self._yellow[1]
+
     def season(self):
         """Year of the session (SessionInfo StartDate), or None before it arrives."""
         d = str(self.d.get('SessionInfo', {}).get('StartDate', ''))[:4]
@@ -382,17 +502,25 @@ def load_track(state, si, positions=False):
     """Outline + pit-loss sources for a SessionInfo payload (feed thread; network).
     New circuits fall back to an archived lap trace. positions=True (feeds that may run without GPS) also learns
     where this circuit's timing points are, on a background thread (see learn_positions)."""
+    key, year = si['Meeting']['Circuit']['Key'], int(si['StartDate'][:4])
     try:
-        state.track = Track(data.circuit(si['Meeting']['Circuit']['Key'], int(si['StartDate'][:4])))
+        state.track = Track(data.circuit(key, year))
     except Exception as e:
         print('circuit API has no outline:', e)
         meeting = si.get('Path', '').rsplit('/', 2)[0]
-        done = [p for _, p in data.past_sessions(int(si['StartDate'][:4]), n=999) if meeting and p.startswith(meeting)]
+        done = [p for _, p in data.past_sessions(year, n=999) if meeting and p.startswith(meeting)]
         if done:
             try:
                 state.track = Track(outline_from_archive(done[-1]))  # earliest finished session of this weekend
             except Exception as e:  # map stays empty; timing still works
                 print('outline fallback failed:', e)
+        if state.track:
+            try:  # turn numbers, marshal sectors: the newest year MultiViewer has this circuit (Singapore: 2023)
+                known = (data.circuit_catalog().get(str(key)) or {}).get('years') or []
+                if known:
+                    state.track.landmarks(data.circuit(key, max(known)))
+            except Exception as e:  # map without them
+                print('no turn numbers or marshal sectors:', e)
     try:
         load_pit_loss(state, si)
     except Exception as e:  # sim falls back to the model default
@@ -446,7 +574,7 @@ def learn_positions(path, track):
     not line up). With both, the no-GPS map was 18 m off the real car (median; 78 m p90) on the 2026 Bahrain race
     learning from its qualifying, against 227 m (482 m) with equal mini-sectors and constant speed."""
     st = State()
-    msgs = ReplayFeed(st, path).messages()
+    msgs = ReplayFeed(st, path).messages(skip=('TeamRadio', 'CarData.z'))  # not needed here, CarData is the biggest
     tr = track
     pts, L = tr.xy[:-1], tr.s[-1]
 
@@ -568,7 +696,7 @@ class ReplayFeed(threading.Thread):
     Can pause (speed 0) and jump to any time or lap (seek / seek_lap)."""
     TOPICS = ['SessionInfo', 'DriverList', 'TimingAppData', 'TimingData', 'TrackStatus', 'LapCount', 'SessionStatus',
               'RaceControlMessages', 'WeatherData', 'PitStopSeries', 'ExtrapolatedClock', 'ChampionshipPrediction',
-              'Position.z']  # Position.z last
+              'TeamRadio', 'CarData.z', 'Position.z']  # car streams last: dropped without GPS (F1 TV only live)
 
     def __init__(self, state, path, speed=1.0, gps=True):
         super().__init__(daemon=True)
@@ -596,8 +724,8 @@ class ReplayFeed(threading.Thread):
         laps = [n for n in self.lap_starts if n <= lap]
         self.seek(self.lap_starts[max(laps)] + 0.5 if laps else self.begin)
 
-    def messages(self):
-        topics = self.TOPICS if self.gps else self.TOPICS[:-1]
+    def messages(self, skip=()):
+        topics = [t for t in (self.TOPICS if self.gps else self.TOPICS[:-2]) if t not in skip]
         return sorted(((t, topic, x) for topic in topics for t, x in data.archive_stream(self.path, topic)),
                       key=lambda m: m[0])
 
@@ -620,9 +748,9 @@ class ReplayFeed(threading.Thread):
                 if i and target < msgs[i - 1][0]:  # backwards: rebuild the session from the start
                     q.put((RESET, None, target))
                     i = 0
-                # fast-forward without waiting. Car positions only for the last 10 s: unpacking every one takes seconds
+                # fast-forward without waiting. Car streams only for the last 10 s: unpacking every one takes seconds
                 while i < len(msgs) and msgs[i][0] <= target:
-                    if msgs[i][1] != 'Position.z' or msgs[i][0] > target - 10:
+                    if msgs[i][1] not in ('Position.z', 'CarData.z') or msgs[i][0] > target - 10:
                         q.put((msgs[i][1], msgs[i][2], msgs[i][0]))
                     i += 1
                 self.t0, self.w0 = target, time.monotonic()
