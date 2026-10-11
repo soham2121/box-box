@@ -1,3 +1,10 @@
-fastf1>=3.8
-PySide6>=6.7
-faster-whisper>=1.0  # team radio transcripts (optional: race control works without it)
+# What Box Box imports itself. Lower bounds are the versions it was tested with (2026-10-11).
+# FastF1 is pinned: the app uses its private F1 TV sign-in and live client code (live.py), which can change in any
+# release. Before raising it, re-test F1 TV sign-in and a live session.
+fastf1==3.8.3
+signalrcore>=1.0.2,<1.1  # FastF1's live client; live.py works around 1.0's no-auth connection bug
+PySide6>=6.11
+numpy>=2.4
+scipy>=1.17
+requests>=2.34
+faster-whisper>=1.2  # team radio transcripts (optional: race control works without it)

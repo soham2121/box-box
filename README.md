@@ -49,6 +49,10 @@ powershell -ExecutionPolicy Bypass -File scripts\create_shortcuts.ps1
 
 One app: a tray icon (red **F1**, with a green dot while live), the desktop widgets, one live connection and the live dashboard window. Right-click the icon for everything else; hover it for the status (`LIVE · Race · L35/62 · recording`, or `next: FP1 in 2d 04:10`). Tray → **Start with Windows** makes it start at login (per-user, no admin) with the widgets only (`--tray`); the shortcut or tray → **Open live dashboard** opens the window. Closing the dashboard leaves the tray, widgets and live feed running. Widgets come back where you left them: positions are saved a second after every move or resize. A widget left off every screen (a monitor unplugged or rearranged) moves onto the nearest one.
 
+Everything the app prints, errors with their full traceback, and FastF1's live client messages go to `%APPDATA%\boxbox\logs\boxbox.log` with a time on each line. It rotates at 1 MB and keeps 5 old files, so a live weekend's problems are still there after a restart. F1 TV tokens are never written to it. FastF1's raw copy of the live feed (`live.txt`) starts afresh past 50 MB, keeping the one before as `live.old.txt`.
+
+`requirements.txt` pins FastF1 to 3.8.3: the app uses its private F1 TV sign-in and live client code, which can change in any release. Re-test sign-in and a live session before raising it.
+
 ## Widgets
 
 | Widget | Shows |
@@ -154,24 +158,26 @@ Checked 2026-10-06 against F1's server between sessions, with and without an F1 
 
 ## Going live
 
-The app goes live by itself from 10 minutes before each session of the current weekend until 30 minutes after it (schedule from Jolpica), for the tray widgets and the dashboard alike. Tray → **Go live now** or the dashboard's **● Go live** connect outside those times; **■ Stop** stops live until that session is over.
+The app goes live by itself from 10 minutes before each session of the current weekend (schedule from Jolpica), for the tray widgets and the dashboard alike. It stays live 30 minutes past the scheduled end, and longer while the session is still on and F1 is still sending (a late start, a long red flag). Outside the schedule it checks F1's own streaming flag every 5 minutes, so a session the schedule doesn't have (or has at the wrong time) goes live too. Switch it off with tray → **Go live by itself around every session** or in Settings. Tray → **Go live now** or the dashboard's **● Go live** connect any time; **■ Stop** stops live until that session is over.
 
 Every live session is recorded to `%APPDATA%\boxbox\sessions\<session key>.jsonl` (everything except GPS and car telemetry, which only matter as they arrive). If the app restarts during a session, it replays that file first, so the lap log for the sim, pit stops and race control come back, then takes the server's snapshot of now. Recordings older than 4 days are deleted.
 
 - **Without F1 TV:** timing, tyres and gaps are live; car positions on the map are estimated from timing. The app learns where this circuit's timing points really are, and how far round the lap a car is at each moment, from GPS in an earlier session (that weekend's latest, else the circuit's latest in the two seasons before; cached). Measured against real GPS on 2026 races, median distance from the real car: Australia 7 m, Britain 8 m, Spain 8 m, Monaco 8 m, Baku 8 m, Monza 11 m, Suzuka 13 m, Bahrain 18 m (was 90–320 m). Hungary stays ~120 m: its race GPS runs ~2.5 s behind its timing, compared with qualifying, so GPS and timing disagree there. Without a usable earlier session (new layout, other timing loops) it falls back to the old estimate (100–300 m).
-- **With F1 TV:** tray → **Sign in to F1 TV…**, log in in the browser; live reconnects with your account (real GPS positions) and keeps the laps logged so far.
+- **With F1 TV:** tray → **Sign in to F1 TV…**, log in in the browser; live reconnects with your account (real GPS positions) and keeps the laps logged so far. The menu item and the dashboard button show the sign-in's state (`signed in to F1 TV until 15 Oct`, `F1 TV sign-in expired: sign in again`). If it runs out before the next session, the tray says so in time to sign in again. An expired sign-in never stalls live: it connects without GPS (FastF1's own token check would open a browser and wait), and all of FastF1's private sign-in code is in `boxbox/auth.py`, so a FastF1 change shows up as a message, not a crash.
 
 Tray → **Replay a past session** (year → weekend → session, same menu as the dashboard's) plays any finished session from 2018 on through the same widgets (speed adjustable), so you can try everything between race weekends.
 
 ## Strategy sim knobs
 
-Model settings live in `%APPDATA%\boxbox\config.json` under `"model"` (tray → **Edit sim model knobs**), e.g.:
+The main ones are in **Settings → Strategy sim**: safety cars, VSCs and red flags per race, soft / medium / hard tyre life, and the pit loss used when nothing better is known. Each shows the value fitted for the session's regulation era; set one to override it (from the next sim run), or turn it down to `fitted` to go back. A tyre life overrides that compound only.
+
+Everything else lives in `%APPDATA%\boxbox\config.json` under `"model"` (tray → **More sim knobs**), e.g.:
 
 ```json
 "model": {"fuel_start_kg": 70, "pass_threshold": 1.0, "sc_per_race": 0.5}
 ```
 
-Restart the app after editing. Defaults and their meanings are in `MODEL` at the top of `boxbox/sim.py`.
+Restart the app after editing the file. Defaults and their meanings are in `MODEL` at the top of `boxbox/sim.py`.
 
 ### What the sim models
 

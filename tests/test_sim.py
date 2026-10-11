@@ -178,3 +178,10 @@ def test_traffic_laps_kept_when_a_driver_has_few_others():
     kept = sim.clean(laps)
     assert sum(l['drv'] == '4' for l in kept) == 11  # laps 2-12, all of them: only lap 2 was free
     assert not any(l['drv'] == '3' and l['lap'] == 5 for l in kept)  # dropped: driver 3 has enough free laps
+
+
+def test_settings_override_one_tyre_life_and_keep_the_fitted_rest():
+    fitted = sim.season_model(2026)
+    m = sim.season_model(2026, {'life': {'SOFT': 18}, 'sc_per_race': 1.0})
+    assert m['life'] == {**fitted['life'], 'SOFT': 18} and m['sc_per_race'] == 1.0
+    assert m['pass'] == fitted['pass']  # untouched knobs stay as fitted

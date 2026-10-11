@@ -9,17 +9,22 @@ from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
 from PySide6.QtGui import QKeySequence, QShortcut
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QDoubleSpinBox, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
                                QMainWindow, QMenu, QPushButton, QSizePolicy, QSlider, QSpinBox, QSplitter,
                                QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton, QWidget)
 
-from . import live, radio
+from . import auth, live, radio, sim
 from .alerts import ALERTS
 from .main import DASH_SETTINGS as SETTINGS, icon
 from .widgets import (COND_BOLD, STATUS_TINT, BattlePanel, RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap,
                       TyrePanel, replay_years)
 
 SPEEDS = (1, 5, 10, 30, 60)
+# Settings → Strategy sim: (config 'model' key, 'life.SOFT' = one entry of a table, label, lowest, highest, step)
+KNOBS = [('sc_per_race', 'Safety cars per race', 0, 3, 0.05), ('vsc_per_race', 'VSCs per race', 0, 3, 0.05),
+         ('red_per_race', 'Red flags per race', 0, 1, 0.01), ('life.SOFT', 'Soft tyre life (laps)', 5, 80, 1),
+         ('life.MEDIUM', 'Medium tyre life (laps)', 5, 80, 1), ('life.HARD', 'Hard tyre life (laps)', 5, 80, 1),
+         ('pit_loss', 'Pit loss when nothing better is known (s)', 10, 40, 0.5)]
 ACCENT = '#E10600'
 CHEVRON = (Path(__file__).parent / 'chevron.svg').as_posix()
 STYLE = f'''
@@ -91,6 +96,9 @@ class Settings(QDialog):
         row.addWidget(self.delay, 1)
         row.addWidget(self.save_delay)
         form.addRow('Delay live data', row)
+        self.auto = QCheckBox('Go live by itself around every session', checked=app.cfg['auto_live'])
+        self.auto.toggled.connect(lambda on: app.set('auto_live', on))
+        form.addRow(self.auto)
         hint = QLabel('Live timing runs ahead of the F1 TV video. Set the delay so overtakes show on the map when you '
                       'see them on the stream (no spoilers), or press ⏱ Sync on the dashboard as the lap counter on '
                       'TV changes. Live only, not replays.', wordWrap=True)
@@ -124,6 +132,18 @@ class Settings(QDialog):
             box = self.kinds[k] = QCheckBox(label)
             box.toggled.connect(lambda on, k=k: app.set('alerts', {**app.cfg['alerts'], k: on}))
             form.addRow(box)
+        form.addRow(QLabel('<b>Strategy sim</b>: the fitted value for the session\'s regulation era unless you set '
+                           'one (lowest = fitted). Used from the next sim run.', wordWrap=True))
+        self.knobs = {}
+        for key, label, lo, hi, step in KNOBS:
+            box = QDoubleSpinBox(minimum=lo - step, maximum=hi, singleStep=step, decimals=0 if step >= 1 else 2)
+            box.setSpecialValueText('fitted')
+            box.valueChanged.connect(lambda v, key=key, box=box: self.set_knob(key, None if v < box.minimum() + box.singleStep() / 2 else v))
+            self.knobs[key] = (box, QLabel(label))
+            form.addRow(self.knobs[key][1], box)
+        reset = QPushButton('Strategy sim: all back to fitted')
+        reset.clicked.connect(lambda: (app.set('model', {}), self.fill()))
+        form.addRow(reset)
         self.fill()
 
     def fill(self):
@@ -150,15 +170,25 @@ class Settings(QDialog):
                 self.drivers.setItem(i, col, box)
         self.drivers.blockSignals(False)
         teams = sorted({t for _, t in rows.values() if t} | {app.cfg['my_team']['name']} - {None})
-        for w in (self.team, self.team_alerts, *self.kinds.values()):
+        for w in (self.team, self.team_alerts, self.auto, *self.kinds.values()):
             w.blockSignals(True)
+        self.auto.setChecked(app.cfg['auto_live'])
         self.team.clear()
         self.team.addItems(['(none)'] + teams)
         self.team.setCurrentText(app.cfg['my_team']['name'] or '(none)')
         self.team_alerts.setChecked(app.cfg['my_team']['alerts'])
         for k, box in self.kinds.items():
             box.setChecked(app.cfg['alerts'].get(k, True))
-        for w in (self.team, self.team_alerts, *self.kinds.values()):
+        fitted = sim.season_model((st and st.season()) or max(sim.SEASONS))
+        mine = app.cfg['model']
+        get = lambda m, key: (m.get('life') or {}).get(key[5:]) if key.startswith('life.') else m.get(key)
+        for key, label, *_ in KNOBS:
+            box, text = self.knobs[key]
+            box.blockSignals(True)
+            box.setValue(get(mine, key) if get(mine, key) is not None else box.minimum())
+            box.blockSignals(False)
+            text.setText(f'{label} (fitted {get(fitted, key):g})')
+        for w in (self.team, self.team_alerts, self.auto, *self.kinds.values()):
             w.blockSignals(False)
 
     def picked(self, item):
@@ -176,6 +206,23 @@ class Settings(QDialog):
         keep = [c for c in old if c in rows and on(c, 1)] + [c for c in rows if on(c, 1) and c not in old]  # order kept
         self.app.set('my_drivers', [{'code': c, 'alerts': on(c, 2)} for c in keep] +
                      [d for d in self.app.cfg['my_drivers'] if d['code'] not in rows])
+
+    def set_knob(self, key, value):
+        """config 'model' override; None = back to the fitted value. A table entry ('life.SOFT') overrides that entry only
+        (sim.season_model merges it into the fitted table)."""
+        m = dict(self.app.cfg['model'])
+        if key.startswith('life.'):
+            life = {k: v for k, v in (m.get('life') or {}).items() if k != key[5:]}
+            if value is not None:
+                life[key[5:]] = int(value)
+            m.pop('life', None)
+            if life:
+                m['life'] = life
+        elif value is None:
+            m.pop(key, None)
+        else:
+            m[key] = value
+        self.app.set('model', m)
 
     def set_team(self, **kw):
         self.app.set('my_team', {**self.app.cfg['my_team'], **kw})
@@ -237,7 +284,7 @@ class Dashboard(QMainWindow):
         bar.addAction('■ Stop', app.stop_feed)
         bar.addSeparator()
         self.signin = bar.addAction('Sign in to F1 TV…', self.sign_in)
-        self.signin.setToolTip(live.SIGNIN_HELP)
+        self.signin.setToolTip(auth.SIGNIN_HELP)
         bar.addAction('Settings…', app.open_settings)
         self.sync = bar.addAction('⏱ Sync delay', self.sync_delay)
         self.sync.setToolTip('Press (or S) the moment the lap counter on the F1 TV stream changes: the live data delay '
@@ -276,7 +323,7 @@ class Dashboard(QMainWindow):
         self.restore()
         self.timer = QTimer(self, timeout=self.tick, interval=500)
         self.timer.start()
-        self.got_token(app.static.get('signed_in'))
+        self.got_token()
         self.tick()
 
     # the app's live session or replay, standings and sim knobs (the panels read them through here)
@@ -405,8 +452,10 @@ class Dashboard(QMainWindow):
         replay_years(m, self.start_replay)
 
     # ---- F1 TV ---------------------------------------------------------------------------------------------------
-    def got_token(self, ok):
-        self.signin.setText('F1 TV: signed in ✓ (sign in again…)' if ok is True else 'Sign in to F1 TV…')
+    def got_token(self):
+        token, text, _ = self.app.static.get('signed_in') or (None, '', None)
+        self.signin.setText(f'F1 TV: {text} ✓ (sign in again…)' if token else 'Sign in to F1 TV…')
+        self.signin.setToolTip((text + '. ' if text and not token else '') + auth.SIGNIN_HELP)
 
     def sign_in(self):
         self.signin.setEnabled(False)
@@ -414,7 +463,7 @@ class Dashboard(QMainWindow):
 
         def done(ok):
             self.signin.setEnabled(True)
-            self.got_token(ok)
+            self.got_token()
             if ok is not True:
                 self.signin.setText(f'F1 TV sign-in failed: {ok}. Try again…')
         self.app.sign_in(done)
@@ -432,6 +481,8 @@ class Dashboard(QMainWindow):
         self.sync.setVisible(bool(on_live) and self.state.session()['type'] in ('Race', 'Sprint'))
         self.live_btn.setText('● Back to live' if self.app.live else '● Go live')
         self.live_btn.setVisible(not on_live)
+        if self.signin.isEnabled():  # not while a sign-in waits for the browser
+            self.got_token()  # the app rechecks the token with every standings refresh
         self.show_chips()
         self.update_replay_bar()
 

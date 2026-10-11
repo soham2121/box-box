@@ -230,3 +230,26 @@ def test_delay_sync_to_the_lap_counter_on_tv():
     assert st.sync_delay(1139.4) == 44  # no delay yet: the latest change, lap 31 shown 44.4 s later
     assert st.sync_delay(1236.0, current=44) == 46  # lap 32, nearest the delay already set
     assert live.State().sync_delay(1000.0) is None
+
+
+def test_live_stays_on_past_the_schedule_while_the_session_runs():
+    """A red flag or late start runs past the schedule: live stays while the session is on and messages arrive."""
+    st = live.State()
+    st.q.put(('SessionStatus', {'Status': 'Aborted'}, 1000.0))  # red flag
+    st.pump()
+    assert st.still_on(1300.0)
+    assert not st.still_on(1700.0)  # 700 s without a message: the feed went quiet
+    st.q.put(('SessionStatus', {'Status': 'Finalised'}, 1710.0))
+    st.pump()
+    assert not st.still_on(1711.0)
+
+
+def test_raw_live_recording_is_kept_small(tmp_path):
+    f = tmp_path / 'live.txt'
+    f.write_text('x' * 10)
+    live.keep_small(f, limit=20)
+    assert f.exists()  # under the limit: untouched
+    f.write_text('y' * 30)
+    live.keep_small(f, limit=20)
+    assert not f.exists() and (tmp_path / 'live.old.txt').read_text() == 'y' * 30
+    live.keep_small(tmp_path / 'missing.txt')  # nothing to do, no error

@@ -5,16 +5,13 @@ import copy
 import json
 import queue
 import re
-import socket
 import threading
 import time
-import webbrowser
 import zlib
-from http.server import HTTPServer
 
 import numpy as np
 
-from . import data
+from . import auth, data
 
 
 RESET = '__reset__'  # pseudo-topic: a replay jumped backwards, start the session state again
@@ -155,6 +152,7 @@ class State:
         self.clock_t = 0       # feed time the last ExtrapolatedClock message arrived
         self.delay = 0         # s to hold live data back, to match a video stream that runs behind live timing
         self.held = collections.deque()
+        self.seen_t = 0        # when the newest message arrived (feed time), before the delay
         self.lap_seen = collections.deque(maxlen=30)  # (arrival time, lap): the leader starting each lap, before the delay
         self.prog = {}         # racing number -> [lap fraction at snap, snap time, cap fraction]
         self.flags = {}        # racing number -> {'pit', 'sc'} seen during the current lap
@@ -178,6 +176,7 @@ class State:
                 m = self.q.get_nowait()
             except queue.Empty:
                 break
+            self.seen_t = max(self.seen_t, m[2])
             if m[0] == RESET:
                 self.trail = {}
             elif m[0] in ('Position', 'Position.z'):  # unpacked once, here, so the trail runs ahead of the delay
@@ -194,6 +193,12 @@ class State:
                 return
             self.apply(*self.held.popleft())
 
+    def still_on(self, now, quiet=600):
+        """The session hasn't ended (not started yet, running, or stopped under a red flag) and messages still
+        arrived in the last `quiet` s: live stays on past the schedule (a late start, a long red flag)."""
+        status = self.d.get('SessionStatus', {}).get('Status')
+        return status in ('Inactive', 'Started', 'Aborted') and now - self.seen_t < quiet
+
     def sync_delay(self, pressed, current=0):
         """Delay (s) that puts a lap-counter change seen live at `pressed`, the moment the TV showed it: the change
         nearest the current delay, or the latest one when none is set. None before any change."""
@@ -209,7 +214,7 @@ class State:
     def reset(self):
         """Back to an empty session (a replay jumping backwards); keeps the queue, feed, track and pit-loss sources."""
         keep = {k: getattr(self, k) for k in ('q', 'held', 'delay', 'feed', 'track', 'pit_known', 'pit_weekend', 'pit_typical',
-                                              'trail', 'gps_off', 'lap_seen')}  # trail: cleared by pump() when it queues the reset
+                                              'trail', 'gps_off', 'lap_seen', 'seen_t')}  # trail: cleared by pump() when it queues the reset
         self.__init__()
         self.__dict__.update(keep)
 
@@ -793,6 +798,7 @@ class LiveFeed(threading.Thread):
         self.state, self.auth, self.stop = state, auth, False
         # record: one process at a time (the dashboard, else the tray). state None: only records (the tray)
         self.record, self.key, self.out = record, None, None
+        self.token = None  # F1 TV token of the current connection (auth.check), None without
         self.status = 'connecting…'
         if state:
             state.feed = self
@@ -850,19 +856,21 @@ class LiveFeed(threading.Thread):
                     feed.push(msg[0], msg[1])
 
             def _run(self):
-                """FastF1 3.8.3 passes access_token_factory=None without auth, and signalrcore 1.0 refuses that
-                ('access_token_factory is not function'). Same connection, with the option left out."""
-                if not self._no_auth:
-                    return super()._run()
+                """FastF1's connection, with two changes. With F1 TV: the token checked before connecting
+                (auth.check), not FastF1's get_auth_token(), which opens a browser and waits when the token has
+                expired. Without: no access_token_factory at all (FastF1 3.8.3 passes None, and signalrcore 1.0
+                refuses that: 'access_token_factory is not function')."""
                 import logging
                 import requests
                 from signalrcore.hub_connection_builder import HubConnectionBuilder
                 self._output_file = open(self.filename, self.filemode)
                 r = requests.options(self._negotiate_url, headers=self.headers)
                 self.headers.update({'Cookie': f"AWSALBCORS={r.cookies['AWSALBCORS']}"})
+                options = {'verify_ssl': True, 'headers': self.headers}
+                if feed.token:
+                    options['access_token_factory'] = lambda: feed.token
                 self._connection = HubConnectionBuilder().with_url(
-                    self._connection_url, options={'verify_ssl': True, 'headers': self.headers}
-                ).configure_logging(logging.INFO).build()
+                    self._connection_url, options=options).configure_logging(logging.INFO).build()
                 self._connection.on_open(self._on_connect)
                 self._connection.on_close(self._on_close)
                 self._connection.on('feed', self._on_message)
@@ -883,10 +891,11 @@ class LiveFeed(threading.Thread):
                 self._exit()
 
         while not self.stop:
-            use_auth = self.auth and token_ok()
-            self.status = 'live (F1 TV)' if use_auth else 'live (no auth: estimated map)'
+            self.token, why, _ = auth.check() if self.auth else (None, 'F1 TV off', None)
+            self.status = 'live (F1 TV)' if self.token else f'live (no auth: estimated map; {why})'
             data.APP_DIR.mkdir(parents=True, exist_ok=True)
-            c = Client(str(data.APP_DIR / 'live.txt'), filemode='a', timeout=120, no_auth=not use_auth)
+            keep_small(data.APP_DIR / 'live.txt')
+            c = Client(str(data.APP_DIR / 'live.txt'), filemode='a', timeout=120, no_auth=not self.token)
             c.topics += ['PitStopSeries', 'TyreStintSeries', 'ChampionshipPrediction']
             try:
                 c.start()  # blocks until no data for `timeout` seconds
@@ -897,63 +906,14 @@ class LiveFeed(threading.Thread):
             self.out.close()
 
 
-# ---- F1 TV sign-in (FastF1's browser helper, without its console prompts) ------
-def token_ok():
-    from fastf1.internals import f1auth
+def keep_small(f, limit=50_000_000):
+    """FastF1 appends a raw copy of every live connection to live.txt (47 MB after one weekend; nothing reads it,
+    the session recordings do that job). Past `limit` it becomes live.old.txt, replacing the one before."""
     try:
-        f1auth._verify_jwt(f1auth.AUTH_DATA_FILE.read_text().strip(), f1auth.JWKS_URL)
-        return True
-    except Exception:
-        return False
-
-
-SIGNIN_HELP = ('Needs the "FastF1 Companion" browser extension (the page links it). Log in at formula1.com, '
-               'then click "Connect FastF1" on the page the extension opens.')
-_signin_port = None  # port of a sign-in still waiting for the browser
-
-
-def sign_in(timeout=1800):
-    """F1 TV sign-in through FastF1's browser flow: the FastF1 Companion extension reads the formula1.com login cookie
-    and POSTs it to http://localhost:<port>/auth. Blocks until that arrives or `timeout` s (installing the extension
-    and logging in can take a while). Returns True, or a string saying what went wrong."""
-    global _signin_port
-    from fastf1.internals import f1auth  # ponytail: private FastF1 internals, re-check on FastF1 upgrades
-    if _signin_port:  # clicked again while waiting: same server, reopen the page
-        webbrowser.open(f'https://f1login.fastf1.dev?port={_signin_port}')
-        f1auth._auth_finished.wait(timeout)
-        return token_ok() or 'sign-in did not finish'
-
-    class Quiet(f1auth.AuthHandler):
-        def log_message(self, *args):  # logs to sys.stderr, which is None under pythonw.exe: the reply never went out
-            pass
-
-    class V6(HTTPServer):
-        address_family = socket.AF_INET6
-
-    servers = [HTTPServer(('127.0.0.1', 0), Quiet)]
-    _signin_port = port = servers[0].server_port
-    try:  # the extension calls 'localhost', which can resolve to ::1 first
-        servers.append(V6(('::1', port), Quiet))
-    except OSError:
+        if f.stat().st_size > limit:
+            f.replace(f.with_name(f.stem + '.old' + f.suffix))
+    except OSError:  # missing, or still open by a connection closing: next time
         pass
-    for s in servers:
-        threading.Thread(target=s.serve_forever, daemon=True).start()
-    f1auth._auth_finished.clear()
-    f1auth._subscription_token = None
-    webbrowser.open(f'https://f1login.fastf1.dev?port={port}')
-    try:
-        arrived = f1auth._auth_finished.wait(timeout)
-    finally:
-        for s in servers:
-            s.shutdown()
-            s.server_close()
-        _signin_port = None
-    if not arrived:
-        return f'no answer from the browser within {timeout // 60} min'
-    if not f1auth._subscription_token:
-        return 'logged in, but the account has no F1 TV subscription token'
-    f1auth.AUTH_DATA_FILE.write_text(f1auth._subscription_token)
-    return token_ok() or 'token received but it did not verify'
 
 
 def laps_from_archive(path, track=True):

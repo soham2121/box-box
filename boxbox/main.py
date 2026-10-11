@@ -4,10 +4,14 @@ import copy
 import ctypes
 import getpass
 import json
+import logging
+import re
 import sys
+import threading
 import time
 import winreg
 from datetime import datetime, timedelta, timezone
+from logging.handlers import RotatingFileHandler
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt, QTimer
@@ -15,7 +19,7 @@ from PySide6.QtNetwork import QLocalServer, QLocalSocket
 from PySide6.QtGui import QAction, QColor, QFont, QIcon, QPainter, QPen, QPixmap
 from PySide6.QtWidgets import QApplication, QInputDialog, QMenu, QSystemTrayIcon
 
-from . import alerts, data, live, sim
+from . import alerts, auth, data, live, sim
 from .alerts import ALERTS
 from .widgets import KINDS, bg, replay_years
 
@@ -36,6 +40,7 @@ DEFAULTS = {
     'my_team': {'name': None, 'alerts': False},
     'battles': [],     # pinned battle cards [['HAM', 'LEC']]
     'alerts': {k: True for k in ALERTS},  # alert types on/off
+    'auto_live': True,  # go live by itself around every session
 }
 
 
@@ -102,6 +107,7 @@ class App:
         self.state = None   # what the widgets and the dashboard show: the live session, or a replay
         self.live = None    # State of the live feed: on by itself around each session (keep_live), or Go live
         self.live_manual = self.live_paused = False  # Go live outside a session / Stop during one
+        self.streaming, self.polled = False, 0  # F1's StreamingStatus, checked every 5 min while not live
         self.dash = None    # the live dashboard window, while open
         self.fetched = 0
         self.alerts = alerts.Watch(self)
@@ -175,7 +181,7 @@ class App:
         def work():
             out = {}
             for key, f in (('drivers', data.driver_standings), ('teams', data.constructor_standings), ('next', data.next_race),
-                           ('signed_in', live.token_ok)):
+                           ('signed_in', auth.check)):
                 try:
                     out[key] = f()
                 except Exception as e:  # offline with no cache: the widget shows the error
@@ -192,8 +198,24 @@ class App:
             self.static.update(out if isinstance(out, dict) else {})
             for w in self.windows.values():
                 w.refresh()
+            self.warn_signin()
         bg(work, done)
         self.check_refit()
+
+    def warn_signin(self):
+        """Once a run: the F1 TV sign-in runs out before the next session (or has), while it was used. Without it live
+        still works, but the map is estimated instead of GPS."""
+        s, race = self.static.get('signed_in'), self.static.get('next')
+        if getattr(self, 'warned', False) or not isinstance(s, tuple) or not isinstance(race, dict) or not self.cfg['live_auth']:
+            return
+        token, text, exp = s
+        nxt = next((x for x in race['sessions'] if x[1] + timedelta(hours=3) > datetime.now(timezone.utc)), None)
+        if nxt and (token and exp and exp < nxt[1] or not token and 'expired' in text):
+            self.warned = True
+            when = nxt[1].astimezone().strftime('%a %d %b %H:%M')
+            self.tray.showMessage('F1 TV sign-in', (f"It runs out on {exp.astimezone():%d %b}, before {race['name']} {nxt[0]} "
+                                                    f"({when})." if token else f"It has run out ({race['name']} {nxt[0]}: {when}).")
+                                  + ' Tray → Sign in to F1 TV… to keep real GPS on the map.')
 
     # ---- sim refit after each race -------------------------------------------------------------------------------
     def check_refit(self):
@@ -294,14 +316,29 @@ class App:
         return isinstance(race, dict) and any(data.live_session(race, now + timedelta(minutes=m)) for m in (10, -30))
 
     def keep_live(self):
-        """Live by itself around every session, recorded (LiveFeed.restore picks it up after a restart)."""
+        """Live by itself around every session (Settings / tray: Go live by itself), recorded (LiveFeed.restore picks
+        it up after a restart). On from 10 min before a scheduled session; also when F1 starts streaming one the
+        schedule doesn't have. Off 30 min after the scheduled end, or later while the session is still on and
+        sending (a late start, a long red flag)."""
+        if not self.cfg['auto_live']:
+            return
         on = self.session_on()
         if not on:
             self.live_paused = False  # Stop holds until that session is over
         if on and not self.live and not self.live_paused:
             self.go_live()
-        elif not on and self.live and not self.live_manual:
+        elif not on and self.live and not self.live_manual and not self.live.still_on(time.time()):
             self.stop_live()
+        if not self.live and time.monotonic() - self.polled > 300:
+            self.polled = time.monotonic()
+            bg(data.streaming, self.got_streaming)
+
+    def got_streaming(self, available):
+        """F1 started streaming (Offline -> Available) while not live: a session the schedule doesn't have."""
+        if available is True and not self.streaming and self.cfg['auto_live'] and not self.live and not self.live_paused:
+            logging.getLogger('boxbox').info('F1 is streaming a session: going live')
+            self.go_live()
+        self.streaming = available is True
 
     def go_live(self, manual=False, keep=False):
         """keep=True reconnects into the same State (after F1 TV sign-in), so laps logged so far stay for the sim."""
@@ -321,6 +358,7 @@ class App:
         if self.state is self.live:
             self.state = None
         self.live, self.live_manual = None, False
+        self.streaming = True  # F1 may stream a while after the flag: only Offline -> Available starts live again
 
     def start_replay(self, path, speed=None, gps=True):
         if self.state and self.state is not self.live and self.state.feed:
@@ -355,7 +393,8 @@ class App:
         if not nxt:
             return 'no session'
         left = int((nxt[1] - now).total_seconds())
-        return f"next: {nxt[0]} in {left // 86400}d {left % 86400 // 3600:02}:{left % 3600 // 60:02}"
+        return (f"next: {nxt[0]} in {left // 86400}d {left % 86400 // 3600:02}:{left % 3600 // 60:02}"
+                + ('' if self.cfg['auto_live'] else ' (going live by itself is off)'))
 
     def show_status(self):
         tip, dot = 'Box Box\n' + self.status(), bool(self.live)
@@ -415,6 +454,8 @@ class App:
             self.refresh_timer.setInterval(value * 60000)
         if key == 'delay' and self.live:
             self.live.delay = value
+        if key == 'auto_live' and not value and self.live:
+            self.live_manual = True  # switched off during a session: this one stays until Stop
         if self.dash:
             self.dash.map.update()
         self.save()
@@ -438,16 +479,16 @@ class App:
 
     def sign_in(self, done=None):
         """F1 TV sign-in in the browser; live reconnects with the token (real GPS) into the same session."""
-        self.tray.showMessage('F1 TV', 'Sign in in your browser. ' + live.SIGNIN_HELP)
+        self.tray.showMessage('F1 TV', 'Sign in in your browser. ' + auth.SIGNIN_HELP)
 
-        def finished(ok):
-            self.static['signed_in'] = ok is True
+        def finished(res):
+            ok, self.static['signed_in'] = res if isinstance(res, tuple) else (res, (None, str(res), None))
             if ok is True and self.live:
                 self.go_live(keep=True)
             self.tray.showMessage('F1 TV', 'Signed in.' if ok is True else f'Sign-in did not finish: {ok}')
             if done:
                 done(ok)
-        bg(live.sign_in, finished)
+        bg(lambda: (auth.sign_in(), auth.check()), finished)  # check: F1's key server, off the UI thread
 
     # ---- tray menu (rebuilt on every open so checkmarks are always current) ---------------------------------------
     def build_menu(self):
@@ -467,9 +508,10 @@ class App:
         m.addAction(self.status() + (f' ({self.live.feed.status})' if self.live and self.live.feed else '')).setEnabled(False)
         act(m, 'Open live dashboard (map + timing + sim)', self.open_dashboard)
         if not self.live:
-            act(m, 'Go live now (goes live by itself around every session)', lambda: self.go_live(manual=True))
+            act(m, 'Go live now', lambda: self.go_live(manual=True))
+        act(m, 'Go live by itself around every session', lambda c: self.set('auto_live', c), self.cfg['auto_live'])
         act(m, 'Settings… (my drivers, alerts, delay)', self.open_settings)
-        act(m, 'Sign in to F1 TV…' + (' (signed in)' if self.static.get('signed_in') is True else ''), self.sign_in)
+        act(m, f'Sign in to F1 TV… ({signin_text(self.static)})', self.sign_in)
         act(m, 'Use F1 TV auth for live', lambda c: self.set('live_auth', c), self.cfg['live_auth'])
 
         rp = m.addMenu('Replay a past session')
@@ -507,7 +549,7 @@ class App:
         act(m, 'Lock positions', lambda c: self.set('locked', c), self.cfg['locked'])
         act(m, 'Always on top (off = desktop layer)', lambda c: self.set('on_top', c), self.cfg['on_top'])
         act(m, 'Start with Windows', set_startup, startup_command() == startup_registered())
-        act(m, 'Edit sim model knobs (config.json)', self.open_config)
+        act(m, 'More sim knobs (config.json; the main ones are in Settings)', self.open_config)
         if self.new_fit:
             act(m, f'Apply new sim fit: {self.new_fit[2]}', self.apply_refit)
         hist = m.addMenu('Strategy sim accuracy' + (' (refitting…)' if self.refit else ''))
@@ -535,6 +577,13 @@ class App:
         import os
         self.save()
         os.startfile(CONFIG)  # ponytail: hand-edit JSON, restart to apply; a settings dialog when knobs get used a lot
+
+
+def signin_text(static):
+    """'signed in to F1 TV until 12 Nov', 'F1 TV sign-in expired: sign in again', … (auth.check, fetched with the
+    standings)."""
+    s = static.get('signed_in')
+    return s[1] if isinstance(s, tuple) else 'checking…'
 
 
 def refit_log():
@@ -643,21 +692,68 @@ def listen(name, on_launch):
     return server
 
 
-def console_to_file(name):
-    """pythonw.exe (shortcuts, autostart) has no console: sys.stdout/stderr are None and code that writes to them
-    crashes. Send them to a file in the app folder instead, rewritten at each launch."""
-    if sys.stderr is None or sys.stdout is None:
-        data.APP_DIR.mkdir(parents=True, exist_ok=True)
-        sys.stdout = sys.stderr = open(data.APP_DIR / f'{name}.log', 'w', encoding='utf-8', buffering=1)
+LOG = data.APP_DIR / 'logs' / 'boxbox.log'
+TOKEN = re.compile(r'eyJ[\w-]+\.[\w-]+\.[\w-]*')  # a JWT (F1 TV sign-in): never written to the log
+
+
+class NoTokens(logging.Filter):
+    def filter(self, record):
+        record.msg, record.args = TOKEN.sub('<token>', record.getMessage()), ()
+        return True
+
+
+class Lines:
+    """stdout / stderr as log lines, so print()s, Qt's tracebacks and FastF1's own console output land in the log
+    with a time. Also echoed to the console when there is one (python.exe; pythonw.exe has none)."""
+
+    def __init__(self, name, echo):
+        self.log, self.echo, self.buf, self.lock = logging.getLogger(name), echo, '', threading.Lock()
+
+    def write(self, s):
+        if self.echo:
+            self.echo.write(s)
+        with self.lock:  # feeds print from their own threads
+            *lines, self.buf = (self.buf + s).split('\n')
+        for line in lines:
+            if line.strip():
+                self.log.info(line.rstrip())
+        return len(s)
+
+    def flush(self):
+        if self.echo:
+            self.echo.flush()
+
+
+def start_log():
+    """logs/boxbox.log in the app folder, 1 MB x 5 files: the last runs stay readable (a live weekend's problems are
+    still there after a restart), without filling the disk."""
+    LOG.parent.mkdir(parents=True, exist_ok=True)
+    h = RotatingFileHandler(LOG, maxBytes=1_000_000, backupCount=5, encoding='utf-8')
+    h.setFormatter(logging.Formatter('%(asctime)s %(levelname)-7s %(name)s: %(message)s'))
+    h.addFilter(NoTokens())
+    root = logging.getLogger()
+    root.addHandler(h)
+    root.setLevel(logging.INFO)
+    for old in ('tray.log', 'live.log'):  # rewritten at each launch before this log replaced them
+        try:
+            (data.APP_DIR / old).unlink(missing_ok=True)
+        except OSError:  # the old version still running has it open
+            pass
+    logging.getLogger('fastf1').propagate = False  # its own handler writes to stderr, which comes here anyway
+    sys.stdout, sys.stderr = Lines('stdout', sys.stdout), Lines('stderr', sys.stderr)
+    sys.excepthook = lambda *exc: logging.getLogger('crash').error('unhandled exception', exc_info=exc)
+    threading.excepthook = lambda a: logging.getLogger('crash').error(f'unhandled exception in {a.thread.name}',
+                                                                       exc_info=(a.exc_type, a.exc_value, a.exc_traceback))
 
 
 def main():
     """Tray, desktop widgets and the live feed; opens the dashboard too unless started with --tray (Windows login)."""
-    console_to_file('tray')
     qapp = QApplication(sys.argv)
     tray_only = '--tray' in sys.argv
     if already_running(INSTANCE, b'tray' if tray_only else b'dash'):
         return
+    start_log()  # after the check: a second launch exits without touching the running app's log
+    logging.getLogger('boxbox').info('started' + (' (--tray)' if tray_only else ''))
     if startup_registered(OLD_RUN_VALUE) is not None:  # registered under the old name: same entry, new name
         set_startup(False, OLD_RUN_VALUE)
         set_startup(True)
