@@ -1,6 +1,6 @@
 # Box Box (was F1 Tracker) — correctness fixes + feature plan
 
-**Status (2026-10-11):** Groups 1–2 done; Group 3 done (item 10 by the schedule, not yet tested live; no on/off switch or late-start check yet). Group 4: 16 done, 15 partly (one Settings dialog, sim knobs still JSON), 15b and 17 to do. Group 5: 20 done, 19 partly (no cache tests), 18 and 21 to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-11):** Groups 1–2 done; Group 3 done (item 10: schedule + F1's streaming flag + late-running sessions, switch in Settings; to test live at the US GP). Group 4 done. Group 5: 18, 19 and 20 done, 21 (PyInstaller) to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.

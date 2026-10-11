@@ -33,6 +33,14 @@ TEAM_COLOURS = {  # Jolpica constructorId -> live timing TeamColour
 }
 
 
+def streaming():
+    """F1's own "a session is streaming now" flag (StreamingStatus.json: 'Available' / 'Offline'), for sessions
+    the schedule doesn't have or has at the wrong time."""
+    r = requests.get(ARCHIVE + 'StreamingStatus.json', headers=UA, timeout=10)
+    r.raise_for_status()
+    return json.loads(r.content.decode('utf-8-sig')).get('Status') == 'Available'
+
+
 def fetch(url, max_age=None, raw=False):
     """GET through a disk cache. max_age=None caches forever (history never changes). Offline -> stale cache."""
     f = CACHE / hashlib.md5(url.encode()).hexdigest()

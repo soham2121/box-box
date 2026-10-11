@@ -80,8 +80,10 @@ def season_model(year, overrides=None, calibrated=True):
         cal['prior'] = {c: tuple(v) for c, v in cal['prior'].items()}
     restart = 2 if year <= 2023 else 1  # DRS after an SC restart: 2 racing laps until 2023, 1 from 2024; 2026 Overtake
     # Mode: once every car has passed the detection point after the restart, so about 1 lap
-    return {**copy.deepcopy(DEFAULTS), 'min_mass_kg': float(mass), 'fuel_start_kg': float(fuel), 'restart_laps': restart,
-            **cal, **(overrides or {})}
+    m = {**copy.deepcopy(DEFAULTS), 'min_mass_kg': float(mass), 'fuel_start_kg': float(fuel), 'restart_laps': restart, **cal}
+    for k, v in (overrides or {}).items():  # a table ('life') is overridden entry by entry: soft life alone keeps the rest
+        m[k] = {**m[k], **v} if isinstance(v, dict) and isinstance(m.get(k), dict) else v
+    return m
 
 
 MODEL.update(season_model(max(SEASONS)))  # current era: the default wherever no session year is known

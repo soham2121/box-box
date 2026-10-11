@@ -238,9 +238,13 @@ Quit the old app first (tray → Quit), then start **Box Box** from the desktop.
 4. Strategy sim tab: pit loss reads `this session, N stops` once 3 stops are done (no longer the published value).
 5. The map has no telemetry card.
 6. Tray → **Strategy sim accuracy** lists refits (empty until the first race after this build reaches the archive).
+7. Settings → **Strategy sim**: each knob shows `fitted` and its fitted value in the label. Set soft tyre life to 18, run **Best window**: softs stop earlier. Turn it back down to `fitted`, or press **all back to fitted**.
+8. Settings → **Go live by itself around every session** unticked: the tray tooltip says `(going live by itself is off)`; tick it again.
+9. `%APPDATA%\boxbox\logs\boxbox.log` exists and has a `started` line with the time; tray menu → **Sign in to F1 TV…** shows the sign-in's state and expiry date.
 
 ### C. Next race weekend (live)
-1. Leave the app running (or Start with Windows). From 10 min before FP1 the tray icon gets a green dot and the tooltip says `LIVE · …` without clicking anything; widgets show the session.
+0. Before the weekend: tray menu → **Sign in to F1 TV…** shows `signed in to F1 TV until …` after a date past the race. If not, sign in again (the tray also warns when it would run out first).
+1. Leave the app running (or Start with Windows). From 10 min before FP1 the tray icon gets a green dot and the tooltip says `LIVE · …` without clicking anything; widgets show the session. If a session overruns (red flag), live stays on until it's finished, past the 30 min.
 2. Open the dashboard during the race: **⏱ Sync delay** (or S) the moment the F1 TV lap counter changes → a popup says the new delay; overtakes on the map now match the stream.
 3. Alerts: with the dashboard open they pop up top right; minimise it and they come as Windows notifications. Expect pit stops of cars around your alert driver, SC/VSC, investigations.
 4. Close the dashboard mid-race and reopen it: laps logged so far are all there (sim panel `N laps logged`).

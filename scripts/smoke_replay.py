@@ -12,7 +12,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from boxbox import live, main  # noqa: E402
+from boxbox import main  # noqa: E402
 
 PATH = sys.argv[1] if len(sys.argv) > 1 else '2026/2026-10-04_Bahrain_Grand_Prix/2026-10-04_Race/'
 LAPS = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '11,25').split(',')]
@@ -41,7 +41,7 @@ print('drivers  ::', text(app.windows['drivers'])[:160])
 print('teams    ::', text(app.windows['teams'])[:160])
 print('next     ::', text(app.windows['next'])[:160])
 
-app.start(live.ReplayFeed, PATH, 60.0)
+app.start_replay(PATH, 60.0)
 st = app.state
 for lap in LAPS:
     assert wait(qa, lambda: st.session()['lap'] >= lap, 600), f'replay never reached lap {lap}'
