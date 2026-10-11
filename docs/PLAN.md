@@ -1,6 +1,6 @@
 # Box Box (was F1 Tracker) — correctness fixes + feature plan
 
-**Status (2026-10-11):** Groups 1–2 done; Group 3 done (item 10: schedule + F1's streaming flag + late-running sessions, switch in Settings; to test live at the US GP). Group 4 done. Group 5: 18, 19 and 20 done, 21 (PyInstaller) to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-11, on `main` via PR #5 and #6):** Groups 1–4 done; Group 3 item 10 (schedule + F1's streaming flag + late-running sessions, switch in Settings) still to be tested live at the US GP (FP1 23 Oct). Group 5: 18, 19 and 20 done, 21 (PyInstaller) to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.
@@ -178,12 +178,14 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Build and launch the exe. Config/cache/logs stay in `%APPDATA%\boxbox`.
 
 ## Critical files
-- `boxbox/sim.py`: pit_loss_from, simulate, rejoin, gap_s, MODEL, backtest
-- `boxbox/live.py`: State._timing/_lap/apply, ReplayFeed.TOPICS, Track.bounds, load_track, sign-in
-- `boxbox/widgets.py`: DriverStandings.projected, SimPanel.loss/tick, TimingTower, TrackMap
-- `boxbox/main.py`: App menu, config, timers
-- `boxbox/data.py`: Jolpica helpers, past_sessions, circuit
-- New: `tests/`, `scripts/smoke_replay.py`, `boxbox/calibrate.py`, `boxbox/log.py`, `boxbox/auth.py`, `docs/*.md`, `requirements-dev.txt`, `boxbox.spec`, `build.ps1`
+- `boxbox/main.py`: the app (tray menu, config, the one live feed and going live by itself, alerts check, sim refit, log setup)
+- `boxbox/dashboard.py`: the dashboard window and the Settings dialog
+- `boxbox/live.py`: State (merge, laps, GPS trail, delay, sync, still_on), ReplayFeed, LiveFeed (recording, restore), Track
+- `boxbox/sim.py`: pit_loss, fit / clean, simulate, rejoin, best_window, stops_owed, battle, season_model, backtest
+- `boxbox/widgets.py`: desktop widgets and dashboard panels (map, tower, sim, battles, stints, race control)
+- `boxbox/alerts.py`, `boxbox/auth.py` (F1 TV), `boxbox/radio.py`, `boxbox/calibrate.py`, `boxbox/data.py` (Jolpica, archive, cache, streaming flag)
+- `tests/`, `scripts/` (smoke_replay, smoke_dashboard, validate_pit_blend, validate_pit_neutral, create_shortcuts), `docs/*.md`
+- Still to come with item 21: `boxbox.spec`, `build.ps1`
 
 ## Verification (every group)
 - `.venv\Scripts\python -m pytest -q` (unit; `-m integration` for archive tests)

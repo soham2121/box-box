@@ -3,6 +3,8 @@
 Status legend: `[x]` done and validated · `[~]` partly done (see note) · `[ ]` not started.
 Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING.md](TESTING.md).
 
+**Where it stands (2026-10-11):** everything below is on `main` (PR #5, #6). Left: item 21 (PyInstaller) and the live test of going live by itself, alerts and Sync delay at the US GP (FP1 23 Oct; F1 TV sign-in runs out 15 Oct, sign in again first). 85 unit tests, 3 integration tests and both smoke scripts pass.
+
 ## Group 1 — Correctness ✅ (ready for user testing)
 
 ### 1. Fallback pit-loss bug
@@ -142,7 +144,7 @@ Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pen
 - [x] Sim refit after each race in the background, offered with the backtest change (tray → Apply new sim fit), history in tray → Strategy sim accuracy. 2026 refitted with Singapore: 23 races
 - [x] Sim fit keeps traffic laps for a driver left with fewer than 3 free laps (found by the pit window alert on Bahrain 2026: HAM P9 → simulated P21). 2026 out of sample: position error 1.21 → 1.13, log score −1.77 → −1.70, lap error 0.689 → 0.675 s
 - [x] `PitStopSeries` not sent live even with F1 TV (checked during the Singapore race)
-- [x] Tests: alerts, battle math, stops owed, delay sync, pit loss order, traffic laps. 74 pass (78 with the log, still-on and sign-in tests)
+- [x] Tests: alerts, battle math, stops owed, delay sync, pit loss order, traffic laps, log, still-on, sign-in, cache, settings override, live.txt cap. 85 pass
 - [x] Renamed **Box Box** (was F1 Tracker): repo `soham2121/box-box` (was `f1-thing`), package `boxbox`, data folder `%APPDATA%\boxbox` (moved from `f1tracker` on the first start, when the old app isn't running), Start with Windows entry and desktop shortcut renamed the same way
 
 ## Group 4 — UX

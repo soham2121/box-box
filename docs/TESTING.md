@@ -143,7 +143,7 @@ First quit the old copies: tray → Quit, and close the F1 live window.
 3. The extension sends you to account.formula1.com. Log in; it then shows "Login Successful!". Click **Connect FastF1**.
    - Expected: "Authentication successful!" in the browser, and `F1 TV: signed in ✓` in the dashboard.
    - Not expected any more: "Could not connect to the local FastF1 application".
-4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\boxbox\live.log` and a screenshot.
+4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\boxbox\logs\boxbox.log` and a screenshot.
 5. Double-click **Box Box** again: no second window opens; the open one comes to the front.
 
 ---
@@ -210,7 +210,7 @@ Close and reopen the dashboard first.
 1. Tray → Replay a past session → 2018 → Abu Dhabi Grand Prix → Race, jump to the last lap. Driver standings header: `PROJECTION AS OF 2018 REPLAY`, HAM 408 (+25), VET 320; constructors Mercedes 655.
 2. Tray replay 2021 → British Grand Prix → Sprint Qualifying near the end: VER +3, HAM +2, BOT +1 (2021 sprint points).
 3. Tray replay 2026 → Bahrain Grand Prix → Qualifying, slider to about 3/5 (Q2): the timing tower header shows `Q2 · mm:ss left`, P11–16 red, six cars greyed `out`.
-4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `tray.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
+4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `%APPDATA%\boxbox\logs\boxbox.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
 
 ## SC / VSC / red flag in the sim (added 2026-10-06)
 1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, lap 25. Strategy sim: third row **safety car on lap** 30, **Best window**: the result says `with safety car on lap 30`; the window ends at the SC (stops on laps 31–33, after the queue has formed, rank lower). Scroll the result if it's long.
@@ -229,7 +229,7 @@ Close and reopen the dashboard first.
 Quit the old app first (tray → Quit), then start **Box Box** from the desktop. The first start moves `%APPDATA%\f1tracker` to `%APPDATA%\boxbox` and renames the Start with Windows entry.
 
 ### A. Automated
-`.venv\Scripts\python -m pytest` (74 pass) and `.venv\Scripts\python scripts\smoke_dashboard.py`: goes live by hand, replays Bahrain to lap 25 while live keeps recording, what-if, back to live, closes the dashboard (tray and live carry on).
+`.venv\Scripts\python -m pytest` (85 pass), `-m integration` (3 pass, downloads data), `.venv\Scripts\python scripts\smoke_replay.py`, and `.venv\Scripts\python scripts\smoke_dashboard.py`: goes live by hand, replays Bahrain to lap 25 while live keeps recording, what-if, back to live, closes the dashboard (tray and live carry on).
 
 ### B. Between race weekends
 1. Double-click **Box Box**: tray icon and dashboard. Double-click it again: the dashboard comes to the front, no second tray icon. Close the dashboard: the tray icon stays; hover it for `next: … in …`.

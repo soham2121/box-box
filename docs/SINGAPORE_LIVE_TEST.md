@@ -5,7 +5,8 @@
 - Restarting the dashboard lost the lap log: live sessions are now recorded and replayed after a restart.
 - The pit marker sat ~3 s too far back: MultiViewer publishes 27.6 s for Singapore, the race's stops measured 24.2 s. The race's own stops now come first (from the third).
 - `PitStopSeries` never arrived live, even with F1 TV: pit stops come from the lap pit flags live.
-- Item 10 (going live by itself) was built after the weekend, by the schedule; still to be tested live.
+- Item 10 (going live by itself) was built after the weekend: by the schedule, F1's streaming flag and sessions running late. To be tested live at the US GP (checklist in TESTING.md, section "One app, battles, alerts, Box Box").
+- Logs are now `%APPDATA%\boxbox\logs\boxbox.log` (rotating); `live.log` / `tray.log` below are the old names.
 
 First real live test of the app. Times are India time (IST), from the Next race widget.
 
