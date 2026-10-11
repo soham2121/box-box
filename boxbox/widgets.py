@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 import numpy as np
 from PySide6.QtCore import QObject, QPointF, QRectF, QSizeF, Qt, QTimer, Signal
 from PySide6.QtGui import QColor, QFont, QPainter, QPainterPath, QPen, QPixmap, QPolygonF
-from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QPushButton, QScrollArea,
+from PySide6.QtWidgets import (QApplication, QComboBox, QFrame, QGraphicsOpacityEffect, QHBoxLayout, QLabel, QMenu, QPushButton, QScrollArea,
                                QSizeGrip, QSizePolicy, QSpinBox, QVBoxLayout, QWidget)
 
 from . import data, live, radio, sim
@@ -84,18 +84,35 @@ def fill_year(sub, year, start):
             m.addAction(session, lambda _=0, p=path: start(p))
 
 
-def table(rows, zebra=False):
+def table(rows, zebra=False, hi=()):
     """Rows of cells -> rich-text table. A cell starting with '#' is a colour bar. zebra: every other row shaded
-    (the live dashboard's solid panels; the translucent desktop widgets stay plain)."""
+    (the live dashboard's solid panels; the translucent desktop widgets stay plain). hi: indexes of rows to highlight
+    (my drivers)."""
     out = [f'<table cellspacing=0 cellpadding=2 width=100%>']
     for i, r in enumerate(rows):
-        out.append(('<tr bgcolor="#171920">' if zebra and i % 2 else '<tr>') + ''.join(f'<td bgcolor="{c}" width=3></td>' if str(c).startswith('#') else f'<td>{c}</td>'
+        out.append(('<tr bgcolor="#2B2F3D">' if i in hi else '<tr bgcolor="#171920">' if zebra and i % 2 else '<tr>') + ''.join(f'<td bgcolor="{c}" width=3></td>' if str(c).startswith('#') else f'<td>{c}</td>'
                                     for c in r) + '</tr>')
     return ''.join(out) + '</table>'
 
 
 def r(s):
     return f'<div align=right>{s}</div>'
+
+
+def my_codes(app):
+    """My drivers' codes (Settings), in the order picked."""
+    return [d['code'] for d in app.cfg.get('my_drivers') or ()]
+
+
+def team_codes(app, st):
+    """Codes of my team's cars in the session on screen: by the session's team name, else the standings' team."""
+    name = (app.cfg.get('my_team') or {}).get('name')
+    if not name or not st:
+        return set()
+    dl = [i for i in st.d.get('DriverList', {}).values() if isinstance(i, dict)]
+    codes = {i.get('Tla') for i in dl if i.get('TeamName') == name}
+    standings = app.static.get('drivers') if isinstance(app.static.get('drivers'), list) else []
+    return codes or {d['code'] for d in standings if d['team'] == name}
 
 
 def scrolled(label):
@@ -483,8 +500,8 @@ class TrackMap(Widget):
         self.draw_ghost(p, st, cars, to, rot, k)
         dl = st.d.get('DriverList', {})
         order = {d['drv']: d['pos'] for d in st.drivers()}
-        f = k * self.app.cfg.get('label_scale', 1.0)  # name size, live dashboard settings
-        follow = self.app.cfg.get('follow')  # names shown only for these drivers (TLAs); None: everyone
+        f = k * self.app.cfg.get('label_scale', 1.0)  # name size, Settings
+        mine = set(my_codes(self.app))  # my drivers: a white ring and a white name, the others' names dimmer
         p.setFont(QFont(COND_BOLD, max(5, round(8 * f))))
         cars = [(n, to(np.array([x, y]) @ rot), pit, dl.get(n) if isinstance(dl.get(n), dict) else {})
                 for n, x, y, pit in sorted(cars, key=lambda c: order.get(c[0], 99))]
@@ -493,23 +510,26 @@ class TrackMap(Widget):
             p.setBrush(QColor(110, 110, 110) if pit else QColor(STATUS_TINT['4']) if n in live.SAFETY_CARS
                        else QColor('#' + info.get('TeamColour', '888888')))
             p.drawEllipse(pt, 5 * k, 5 * k)
-        groups = []  # bunched cars: stack up to 4 labels in running order, then "+N"
+            if info.get('Tla') in mine:
+                p.setPen(QPen(QColor('#FFFFFF'), 2 * k))
+                p.setBrush(Qt.NoBrush)
+                p.drawEllipse(pt, 8.5 * k, 8.5 * k)
+        groups = []  # bunched cars: stack up to 4 labels in running order (my drivers first), then "+N"
         for n, pt, pit, info in cars:
             label = 'SC' if n in live.SAFETY_CARS else info.get('Tla') or n
-            if follow is not None and label != 'SC' and label not in follow:
-                continue
             g = next((g for g in groups if (g[0] - pt).manhattanLength() < 14 * f), None)
             if g is None:
                 groups.append(g := [pt, []])
             g[1].append((label, pit))
         for pt, labels in groups:
+            labels.sort(key=lambda lp: lp[0] not in mine)  # stable: running order otherwise
             for i, (label, pit) in enumerate(labels[:4]):
-                p.setPen(QColor(235, 235, 235) if not pit else QColor(140, 140, 140))
+                p.setPen(QColor(140, 140, 140) if pit else QColor('#FFFFFF') if label in mine or not mine
+                         else QColor(185, 188, 196))
                 p.drawText(pt + QPointF(7 * k, (4 + 10 * i) * f), label if i < 3 or len(labels) == 4 else f'+{len(labels) - 3}')
         w = st.d.get('WeatherData', {})
         if w.get('WindDirection') not in (None, ''):
             self.draw_wind(p, rot, float(w['WindDirection']), w.get('WindSpeed', '?'), k)
-        self.draw_telemetry(p, st, k)
 
         p.setFont(QFont(COND, 9))
         p.setPen(QColor('#3DDC84') if gps else QColor('#fc5'))
@@ -572,44 +592,6 @@ class TrackMap(Widget):
         p.setPen(QColor(235, 235, 235))
         p.drawText(pt + QPointF(9 * k, -6 * k), 'pit')
 
-    def draw_telemetry(self, p, st, k):
-        """Focus car's speed, gear, RPM, throttle and brake (CarData: F1 TV live, or replays) in the bottom-right
-        corner. DRS only when the feed has it (gone from 2026)."""
-        me = self.focus()
-        ch = ((st.d.get('CarData') or {}).get(me) or {}).get('Channels') if me else None
-        if not ch:
-            return
-        k = min(k, 1.6)
-        w, h = 150 * k, 74 * k
-        r = QRectF(self.width() - w - 12, self.height() - h - 30, w, h)
-        p.setPen(QPen(QColor('#2E3240'), 1))
-        p.setBrush(QColor(11, 12, 16, 220))
-        p.drawRoundedRect(r, 8, 8)
-        info = st.d.get('DriverList', {}).get(me)
-        info = info if isinstance(info, dict) else {}
-        x0, y0 = r.left() + 10 * k, r.top() + 8 * k
-        p.setFont(QFont(COND_BOLD, max(6, round(9 * k))))
-        p.setPen(QColor('#' + info.get('TeamColour', '888888')))
-        p.drawText(QPointF(x0, y0 + 10 * k), info.get('Tla') or me)
-        p.setPen(QColor('#ECEDF1'))
-        p.drawText(QRectF(x0, y0, w - 20 * k, 14 * k), Qt.AlignRight | Qt.AlignVCenter,
-                   f"{ch.get('2', 0)} km/h  ·  G{ch.get('3', 0)}")
-        p.setFont(QFont(COND, max(5, round(7 * k))))
-        p.setPen(QColor('#8A8F9C'))
-        drs = ch.get('45')
-        p.drawText(QPointF(x0, y0 + 26 * k), f"{ch.get('0', 0)} rpm" + (
-            '' if drs is None else '  ·  DRS ' + ('OPEN' if drs in (10, 12, 14) else 'ready' if drs == 8 else 'off')))
-        for i, (label, val, col) in enumerate((('THR', ch.get('4', 0), '#3DDC84'), ('BRK', ch.get('5', 0), '#ff3b3b'))):
-            y = y0 + (36 + 14 * i) * k
-            p.setPen(QColor('#8A8F9C'))
-            p.drawText(QPointF(x0, y + 7 * k), label)
-            bar = QRectF(x0 + 26 * k, y, w - 46 * k, 8 * k)
-            p.setPen(Qt.NoPen)
-            p.setBrush(QColor('#20232C'))
-            p.drawRoundedRect(bar, 3, 3)
-            p.setBrush(QColor(col))
-            p.drawRoundedRect(QRectF(bar.topLeft(), QSizeF(bar.width() * min(max(val, 0), 100) / 100, bar.height())), 3, 3)
-
     def draw_wind(self, p, rot, frm, speed, k):
         """Compass in the top-right corner, turned like the map: N, and an arrow pointing where the wind blows.
         Position x/y run east/north (fits OpenStreetMap within 2° at 5 circuits). F1's WindDirection is where the wind
@@ -662,6 +644,22 @@ class TimingTower(Widget):
     title = 'TIMING'
     size_hint = (330, 560)
 
+    def contextMenuEvent(self, e):
+        """Right-click: pin a battle card (BATTLES) for any two drivers."""
+        st = self.app.state
+        ds = [d for d in st.drivers() if d['pos'] < 99 and not d['out']] if st else []
+        if len(ds) < 2:
+            return
+        menu = QMenu(self)
+        sub = menu.addMenu('Add battle')
+        for a in ds:
+            pick = sub.addMenu(f"P{a['pos']} {a['code']}")
+            for b in ds:
+                if b is not a:
+                    pick.addAction(f"vs P{b['pos']} {b['code']}", lambda a=a['code'], b=b['code']: owner(self.app).set(
+                        'battles', owner(self.app).cfg['battles'] + [[a, b]]) if [a, b] not in owner(self.app).cfg['battles'] else None)
+        menu.exec(e.globalPos())
+
     def tick(self):
         if _need_feed(self):
             return
@@ -693,7 +691,9 @@ class TimingTower(Widget):
                          f"<span style='color:{col}'><b>{letter}</b></span>{d['age']}",
                          'PIT' if d['pit'] else grey(d['stops'] or '')])
         status = getattr(st.feed, 'status', '')
-        self.body.setText(f"<span style='color:#999'>{status} · {s['track']} {s['status']}</span>" + table(rows, self.docked))
+        mine, shown = set(my_codes(self.app)), st.drivers()[:self.cfg['n']]
+        hi = {i + bool(wide) for i, d in enumerate(shown) if d['code'] in mine}
+        self.body.setText(f"<span style='color:#999'>{status} · {s['track']} {s['status']}</span>" + table(rows, self.docked, hi))
 
 
 class SimPanel(Widget):
@@ -750,7 +750,8 @@ class SimPanel(Widget):
             keep = self.drv.currentText()
             self.drv.clear()
             self.drv.addItems(codes)
-            self.drv.setCurrentText(keep)
+            first = next((c for m in my_codes(self.app) for c in codes if c.split()[0] == m), None)
+            self.drv.setCurrentText(keep if keep in codes else first or keep)  # opens on my first driver
         if not s['total']:
             self.body.setText('<i>Strategy sim needs a race or sprint (lap count).</i>')
             return
@@ -923,8 +924,10 @@ class SectorTower(Widget):
             rows.append([pos, f"#{d['colour']}", code, r(best), r(grey(gap if d['pos'] > 1 else '')),
                          *(sectors + [''] * 3)[:3], r(f"<span style='color:{lcol}'>{last.get('Value', '')}</span>"),
                          tyre(d['cmp'], d['age'], st), r(grey(d['laps'] or '')), 'PIT' if d['pit'] else ''])
+        mine = set(my_codes(self.app))
+        hi = {i + 1 for i, d in enumerate(st.drivers()) if d['code'] in mine}
         self.body.setText(f"<span style='color:#999'>{getattr(st.feed, 'status', '')} · {s['track']} {s['status']}</span>"
-                          f"<div style='font-size:9pt'>{table(rows, self.docked)}</div>")  # 9pt: 22 rows fit
+                          f"<div style='font-size:9pt'>{table(rows, self.docked, hi)}</div>")  # 9pt: 22 rows fit
 
 
 class TyrePanel(Widget):
@@ -1053,5 +1056,125 @@ class RaceControl(Widget):
         self.body.setText(f"<span style='color:#999'>{weather}</span>" + (table(rows, self.docked) if rows else '<br><i>no messages yet</i>'))
 
 
+def owner(app):
+    """The tray app (main.App) behind a widget: the dashboard window passes itself as `app` to its panels."""
+    return getattr(app, 'app', app)
+
+
+def spark(values):
+    """Values as a row of block characters, lowest ▁ to highest █."""
+    if len(values) < 2:
+        return ''
+    lo, hi = min(values), max(values)
+    return ''.join('▁▂▃▄▅▆▇█'[min(int((v - lo) / (hi - lo + 1e-9) * 8), 7)] for v in values)
+
+
+class BattlePanel(Widget):
+    """Races and sprints: my drivers against the cars just ahead and behind, plus pinned pairs (+ Battle, or right-click
+    the timing tower). Each line: gap on track, gap once both have made the stops they still owe (pit loss), pace edge,
+    when it catches, tyres; the gap over the last 10 laps; and the real rival (nearest once stops are counted)."""
+    title = 'BATTLES'
+    size_hint = (420, 520)
+
+    def __init__(self, app, key, parent=None):
+        super().__init__(app, key, parent)
+        self.lay.removeWidget(self.body)
+        self.body.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Preferred)  # its full height, for the scroll area
+        self.body.linkActivated.connect(self.link)
+        self.a, self.b = QComboBox(), QComboBox()
+        add = QPushButton('+ Battle')
+        add.clicked.connect(lambda: self.pin(self.a.currentText(), self.b.currentText()))
+        row = QHBoxLayout()
+        for w, stretch in ((self.a, 1), (QLabel('vs'), 0), (self.b, 1), (add, 0)):
+            row.addWidget(w, stretch)
+        self.lay.insertLayout(1, row)
+        self.lay.addWidget(scrolled(self.body), 1)
+        self.setStyleSheet(self.styleSheet() + ' QComboBox, QPushButton { font: 9pt "Segoe UI"; }')
+
+    def pin(self, a, b):
+        cfg = owner(self.app).cfg
+        if a and b and a != b and [a, b] not in cfg['battles']:
+            owner(self.app).set('battles', cfg['battles'] + [[a, b]])
+            self.tick()
+
+    def link(self, url):
+        kind, a, b = url.split(':')
+        if kind == 'pin':
+            self.pin(a, b)
+        else:
+            owner(self.app).set('battles', [p for p in owner(self.app).cfg['battles'] if p != [a, b]])
+            self.tick()
+
+    def tick(self):
+        if _need_feed(self):
+            return
+        st, s = self.app.state, self.app.state.session()
+        ds = [d for d in st.drivers() if d['pos'] < 99]
+        codes = [d['code'] for d in ds]
+        for box in (self.a, self.b):
+            if [box.itemText(i) for i in range(box.count())] != codes:
+                keep = box.currentText()
+                box.clear()
+                box.addItems(codes)
+                box.setCurrentText(keep)
+        if not s['total'] or not s['lap']:
+            self.body.setText('<i>Battles need a race or sprint under way.</i>')
+            return
+        app = owner(self.app)
+        pinned = app.cfg['battles']
+        out = {d['code'] for d in ds if d['out']}
+        if any(set(p) & out for p in pinned):  # a pinned car retired: its card goes
+            app.set('battles', pinned := [p for p in pinned if not set(p) & out])
+        m = {**self.app.model(), 'two_compounds': 'Sprint' not in s['name']}
+        loss, lap_s = st.pit_loss(m)['normal'], sim.lap_time(st.laps)
+        by = {d['code']: d for d in ds}
+        run = [d for d in ds if not d['out']]
+        cards = [self.card(st, run, by[a], [by[b]], loss, m, lap_s, pinned=True) for a, b in pinned if a in by and b in by]
+        for code in my_codes(self.app):
+            me = by.get(code)
+            if me and not me['out']:
+                near = [d for d in run if abs(d['pos'] - me['pos']) == 1]
+                cards.append(self.card(st, run, me, sorted(near, key=lambda d: d['pos']), loss, m, lap_s))
+        self.body.setText(''.join(cards) or "<i>Pick My drivers in Settings, or pin a pair above "
+                                             "(or right-click the timing tower).</i>")
+
+    def card(self, st, ds, me, others, loss, m, lap_s, pinned=False):
+        s = st.session()
+        grey = "<span style='color:#888'>{}</span>".format
+        tyre_of = lambda d: f"{tyre(d['cmp'], d['age'], st)} {grey(f'{n} stop' + ('s' if n != 1 else '') + ' to make' if (n := sim.stops_owed(d, s['total'] - s['lap'], m)) else 'no stop to make')}"
+        head = (f"<b style='color:#{me['colour']}'>▌</b><b>{me['code']}</b> P{me['pos']} · {tyre_of(me)}"
+                + (f" &nbsp;<a href='unpin:{me['code']}:{others[0]['code']}' style='color:#888;text-decoration:none'>✕</a>"
+                   if pinned else ''))
+        rows = []
+        for o in others:
+            x = sim.battle(ds, st.laps, me['drv'], o['drv'], s['lap'], s['total'], loss, m, lap_s)
+            where = 'ahead' if x['gap'] < 0 else 'behind'
+            net = x['net']
+            net_txt = (f"{me['code'] if net > 0 else o['code']} ahead by {abs(net):.1f}s" + (
+                f" ({o['code']} has {x['owed'][1]} stop{'s' if x['owed'][1] != 1 else ''} to make, {me['code']} {x['owed'][0]})"
+                if x['owed'][0] != x['owed'][1] else ''))
+            e, left = x['edge'], s['total'] - s['lap']
+            pace = '' if e is None else f"{('closing' if e > 0 else 'dropping back') if where == 'ahead' else ('pulling away' if e > 0 else 'being caught')} {abs(e):.1f}s/lap"
+            caught = int(np.ceil(x['gap'] / -e)) if e and e < 0 and where == 'behind' else None
+            catch = (f" · catches in ~{x['catch']} laps" if x['catch'] else
+                     f" · caught in ~{caught} laps" if caught and caught <= left else '')
+            ot = " <b style='color:#3DDC84'>OVERTAKE MODE RANGE</b>" if x['close'] else ''
+            rows.append(f"<br>{'▲' if where == 'ahead' else '▼'} <b style='color:#{o['colour']}'>{o['code']}</b> P{o['pos']}"
+                        f" · on track <b>{abs(x['gap']):.1f}s {where}</b>{ot} · {tyre_of(o)}"
+                        f"<br>&nbsp;&nbsp;&nbsp;{grey('net of stops:')} {net_txt}"
+                        + (f"<br>&nbsp;&nbsp;&nbsp;{pace}{catch}" if pace else '')
+                        + (f" &nbsp;<span style='color:#7cc4ff'>{spark([abs(v) for v in x['trend']])}</span> {grey('gap, last laps')}"
+                           if len(x['trend']) >= 3 else ''))
+        rival = sim.real_rival(ds, st.laps, me['drv'], s['lap'], s['total'], loss, m, lap_s)
+        tail = ''
+        if not pinned and rival and rival[0] not in {o['drv'] for o in others}:
+            r = next(d for d in ds if d['drv'] == rival[0])
+            tail = (f"<br>{grey('Real rival:')} <b style='color:#{r['colour']}'>{r['code']}</b> P{r['pos']}, "
+                    f"{abs(rival[1]):.1f}s {'ahead' if rival[1] < 0 else 'behind'} net of stops "
+                    f"<a href='pin:{me['code']}:{r['code']}' style='color:#7cc4ff'>pin</a>")
+        return (f"<div style='margin-bottom:10px'>{head}{''.join(rows)}{tail}</div>"
+                "<hr style='border:0;background:#252934;height:1px'>")
+
+
 KINDS = {'drivers': DriverStandings, 'teams': ConstructorStandings, 'next': NextRace,
-         'map': TrackMap, 'tower': TimingTower, 'sim': SimPanel}
+         'map': TrackMap, 'tower': TimingTower, 'sim': SimPanel, 'battles': BattlePanel}

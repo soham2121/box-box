@@ -6,6 +6,7 @@ Fuel and tyre age both grow linearly through a stint, so data can't separate the
 import copy
 import json
 import sys
+from collections import Counter
 from pathlib import Path
 
 import numpy as np
@@ -116,12 +117,17 @@ def mass_kg(lap, total, m=MODEL):
 
 
 def clean(laps, m=MODEL):
-    """Green-flag, non-pit laps on a known compound, without traffic or obvious mistakes."""
+    """Green-flag, non-pit laps on a known compound, without obvious mistakes, and without traffic (within 1 s of the
+    car ahead) unless that would leave a driver fewer than 3 laps: Bahrain 2026, HAM ran in traffic from lap 13 on and
+    his only traffic-free laps were laps 7-8, 10 s slower, so the sim put him from P9 to P21."""
     ok = [l for l in laps if l['t'] and not l['pit'] and not l['sc'] and l['lap'] > 1 and l['cmp'] in m['prior']]
     if not ok:
         return []
     med = np.median([l['t'] for l in ok])
-    return [l for l in ok if l['t'] < med * 1.07 and (l['int'] is None or l['int'] > 1.0)]
+    fast = [l for l in ok if l['t'] < med * 1.07]
+    free = lambda l: l['int'] is None or l['int'] > 1.0
+    n = Counter(l['drv'] for l in fast if free(l))
+    return [l for l in fast if free(l) or n[l['drv']] < 3]
 
 
 def fit(laps, total, m=MODEL):
@@ -271,20 +277,22 @@ def pit_loss_samples(laps, stops, m=MODEL):
 
 def pit_loss(laps=(), stops=None, known=None, weekend=None, typical=None, m=MODEL):
     """Pit loss {'normal', 'sc', 'vsc', 'source', 'n'} from the best available source:
-    circuit API value > this session's green stops (>= 3) > an earlier race of the weekend (sprint)
-    > median over the circuit catalogue > MODEL default."""
-    if known and known.get('normal'):
+    this session's green stops (>= 3) > circuit API value > an earlier race of the weekend (sprint)
+    > median over the circuit catalogue > MODEL default. The session's own stops beat the published value as soon as
+    there are 3 (scripts/validate_pit_blend.py, 799 stops of 2025-26: loss 1.18 -> 0.84 s off, 'pit now' rejoin
+    1.35 -> 1.30 places off; Singapore is published at 27.6 s and measured 23.6-24.2 s). SC / VSC: the published
+    values while there are any (too few stops under them to measure)."""
+    s = pit_loss_samples(laps, stops if stops is not None else stops_from_laps(laps), m)
+    if len(s) >= 3:  # two samples were up to 15 s off in the 2026 races
+        normal, src, n = float(np.median(s)), 'this session', len(s)
+    elif known and known.get('normal'):
         normal, src, n = float(known['normal']), 'circuit data', 0
+    elif weekend:
+        normal, src, n = weekend['normal'], weekend['source'], weekend['n']
+    elif typical:
+        normal, src, n = typical, 'typical circuit', 0
     else:
-        s = pit_loss_samples(laps, stops if stops is not None else stops_from_laps(laps), m)
-        if len(s) >= 3:  # two samples were up to 15 s off in the 2026 races
-            normal, src, n = float(np.median(s)), 'this session', len(s)
-        elif weekend:
-            normal, src, n = weekend['normal'], weekend['source'], weekend['n']
-        elif typical:
-            normal, src, n = typical, 'typical circuit', 0
-        else:
-            normal, src, n = m['pit_loss'], 'default', 0
+        normal, src, n = m['pit_loss'], 'default', 0
     known = known or {}
     return {'normal': normal, 'sc': float(known.get('sc') or normal * m['sc_pit_ratio']),
             'vsc': float(known.get('vsc') or normal * m['vsc_pit_ratio']), 'source': src, 'n': n}
@@ -502,6 +510,51 @@ def rejoin(drivers, drv, loss, lap_s=None):
     behind = [o for o in others if o[0] > me]
     return (len(ahead) + 1, ahead[-1][1] if ahead else None, me - ahead[-1][0] if ahead else None,
             behind[0][1] if behind else None, behind[0][0] - me if behind else None)
+
+
+def stops_owed(d, laps_left, m=MODEL):
+    """Stops a car still has to make, roughly: as many as its tyres need to reach the flag (default lives), and at
+    least one while it owes the two-compound rule. Wet tyres: 0 (the weather decides)."""
+    dry = ('SOFT', 'MEDIUM', 'HARD')
+    if laps_left <= 0 or d['cmp'] not in dry:
+        return 0
+    life = m['life']
+    left_on_set = life.get(d['cmp'], 30) - (d['age'] or 0)
+    need = 0 if laps_left <= left_on_set else int(np.ceil((laps_left - left_on_set) / max(life.get(c, 30) for c in dry)))
+    used = set(d.get('used') or ()) | {d['cmp']}
+    owes = m.get('two_compounds', True) and len(used & set(dry)) < 2 and not used & {'INTERMEDIATE', 'WET'}
+    return max(need, int(owes))
+
+
+def battle(ds, laps, me, other, lap, total, loss, m=MODEL, lap_s=None):
+    """One battle from me's side: other's gap on track (s, + = other behind), gap net of the stops each still has
+    to make, pace edge (s/lap over their last 5 common green laps, + = me faster), laps until me catches other (None if
+    not closing or other is behind), and the gap at the end of each of the last 10 laps (oldest first)."""
+    g = gaps(ds, lap_s)
+    by = {d['drv']: d for d in ds}
+    a, b = by[me], by[other]
+    gap = g[other] - g[me]
+    left = max(total - lap, 0)
+    owed_a, owed_b = stops_owed(a, left, m), stops_owed(b, left, m)
+    green = lambda drv: {l['lap']: l['t'] for l in laps if l['drv'] == drv and l['t'] and not l['pit'] and not l['sc']
+                         and l['lap'] > 1}
+    ta, tb = green(me), green(other)
+    common = sorted(ta.keys() & tb.keys())[-5:]
+    edge = float(np.mean([tb[n] - ta[n] for n in common])) if len(common) >= 2 else None
+    catch = int(np.ceil(-gap / edge)) if edge and edge > 0 and gap < 0 else None
+    end = {(l['drv'], l['lap']): l['gap'] for l in laps}
+    trend = [end[(other, n)] - end[(me, n)] for n in range(max(lap - 9, 1), lap + 1)
+             if end.get((other, n)) is not None and end.get((me, n)) is not None]
+    return {'gap': gap, 'net': gap + (owed_b - owed_a) * loss, 'owed': (owed_a, owed_b), 'edge': edge,
+            'catch': catch if catch is None or catch <= left else None, 'trend': trend,
+            'close': abs(gap) < 1.0 and abs(a['pos'] - b['pos']) == 1}
+
+
+def real_rival(ds, laps, me, lap, total, loss, m=MODEL, lap_s=None):
+    """The car nearest me once both have made their remaining stops: (racing number, net gap), or None."""
+    out = [(abs(x['net']), d['drv'], x['net']) for d in ds if d['drv'] != me and not d['out']
+           for x in [battle(ds, laps, me, d['drv'], lap, total, loss, m, lap_s)]]
+    return min(out)[1:] if out else None
 
 
 def what_if(drivers, lap, model, drv, pit_lap, compound, runs=400, pit_loss=None, lap_s=None, conditions=None,

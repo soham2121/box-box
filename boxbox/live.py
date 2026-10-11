@@ -155,6 +155,7 @@ class State:
         self.clock_t = 0       # feed time the last ExtrapolatedClock message arrived
         self.delay = 0         # s to hold live data back, to match a video stream that runs behind live timing
         self.held = collections.deque()
+        self.lap_seen = collections.deque(maxlen=30)  # (arrival time, lap): the leader starting each lap, before the delay
         self.prog = {}         # racing number -> [lap fraction at snap, snap time, cap fraction]
         self.flags = {}        # racing number -> {'pit', 'sc'} seen during the current lap
         self.lastlap = {}
@@ -182,12 +183,24 @@ class State:
             elif m[0] in ('Position', 'Position.z'):  # unpacked once, here, so the trail runs ahead of the delay
                 m = ('Position', unz(m[1]) if m[0].endswith('.z') else m[1], m[2])
                 self.add_trail(m[1], m[2])
+            elif m[0] == 'LapCount' and isinstance(m[1], dict) and str(m[1].get('CurrentLap', '')).isdigit():
+                lap = int(m[1]['CurrentLap'])
+                if not self.lap_seen or lap > self.lap_seen[-1][1]:
+                    self.lap_seen.append((m[2], lap))
             self.held.append(m)
         now = self.now()
         while self.held and time.monotonic() < end:
             if self.lag() and self.held[0][2] > now:
                 return
             self.apply(*self.held.popleft())
+
+    def sync_delay(self, pressed, current=0):
+        """Delay (s) that puts a lap-counter change seen live at `pressed`, the moment the TV showed it: the change
+        nearest the current delay, or the latest one when none is set. None before any change."""
+        ds = [pressed - t for t, lap in self.lap_seen if t <= pressed]
+        if not ds:
+            return None
+        return round(min(ds, key=lambda d: abs(d - current)) if current else min(ds))
 
     def lag(self):
         """The delay applies to the live feed only (replays have their own clock)."""
@@ -196,7 +209,7 @@ class State:
     def reset(self):
         """Back to an empty session (a replay jumping backwards); keeps the queue, feed, track and pit-loss sources."""
         keep = {k: getattr(self, k) for k in ('q', 'held', 'delay', 'feed', 'track', 'pit_known', 'pit_weekend', 'pit_typical',
-                                              'trail', 'gps_off')}  # trail: cleared by pump() when it queues the reset
+                                              'trail', 'gps_off', 'lap_seen')}  # trail: cleared by pump() when it queues the reset
         self.__init__()
         self.__dict__.update(keep)
 

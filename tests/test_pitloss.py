@@ -1,7 +1,7 @@
 import pytest
 
 from conftest import make_race
-from f1tracker import live, sim
+from boxbox import live, sim
 
 STOPS = [('2', 12), ('4', 14), ('6', 16), ('8', 18)]
 
@@ -70,10 +70,14 @@ def test_slow_stationary_time_is_replaced_by_the_typical_one():
     assert sim.pit_loss(laps, s)['normal'] == pytest.approx(22.0, abs=0.3)
 
 
-def test_circuit_api_value_wins_and_sc_vsc_follow():
+def test_circuit_api_value_until_three_own_stops_and_sc_vsc_follow():
     laps = make_race(stops=STOPS)
-    r = sim.pit_loss(laps, stops(STOPS), known={'normal': 21.8, 'sc': 13.81, 'vsc': 15.77})
-    assert (r['source'], r['normal'], r['sc'], r['vsc']) == ('circuit data', 21.8, 13.81, 15.77)
+    known = {'normal': 27.6, 'sc': 13.81, 'vsc': 15.77}  # published too high, like Singapore
+    r = sim.pit_loss(laps, stops(STOPS[:2]), known=known)
+    assert (r['source'], r['normal'], r['sc'], r['vsc']) == ('circuit data', 27.6, 13.81, 15.77)
+    r = sim.pit_loss(laps, stops(STOPS), known=known)  # this race's own stops from the third on
+    assert r['source'] == 'this session' and r['normal'] == pytest.approx(22.0, abs=0.3)
+    assert (r['sc'], r['vsc']) == (13.81, 15.77)  # SC / VSC stay as published
     r = sim.pit_loss(laps, stops(STOPS))
     assert r['sc'] == pytest.approx(r['normal'] * sim.MODEL['sc_pit_ratio'])
     assert r['vsc'] == pytest.approx(r['normal'] * sim.MODEL['vsc_pit_ratio'])

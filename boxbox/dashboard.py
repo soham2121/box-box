@@ -1,21 +1,24 @@
-"""Live dashboard: one window with a big track map, the timing tower and the strategy sim, no standings.
-Connects to the live feed on launch. Run: python -m f1tracker.dashboard (or double-click "F1 Live.bat")."""
+"""Live dashboard: one window of the tray app (main.App) with a big track map, the timing tower and the strategy sim.
+It shows the app's live session or replay (App.state); closing it leaves the tray, widgets and live feed running.
+Opened from the tray, or by starting the app again (desktop shortcut)."""
+import collections
+import html
 import json
-import sys
 import time
 from pathlib import Path
 
 from PySide6.QtCore import QByteArray, Qt, QTimer
-from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFormLayout, QHBoxLayout, QLabel, QListWidget,
-                               QListWidgetItem, QMainWindow, QMenu, QPushButton, QSizePolicy, QSlider, QSpinBox,
-                               QSplitter, QStackedWidget, QTabWidget, QToolBar, QToolButton, QWidget)
+from PySide6.QtGui import QKeySequence, QShortcut
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog, QFormLayout, QHBoxLayout, QHeaderView, QLabel,
+                               QMainWindow, QMenu, QPushButton, QSizePolicy, QSlider, QSpinBox, QSplitter,
+                               QStackedWidget, QTableWidget, QTableWidgetItem, QTabWidget, QToolBar, QToolButton, QWidget)
 
-from . import data, live, sim
-from .main import DASH_INSTANCE as INSTANCE, already_running, console_to_file, icon, listen, load_config
-from .widgets import (COND_BOLD, STATUS_TINT, RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap,
-                      TyrePanel, bg, replay_years)
+from . import live, radio
+from .alerts import ALERTS
+from .main import DASH_SETTINGS as SETTINGS, icon
+from .widgets import (COND_BOLD, STATUS_TINT, BattlePanel, RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap,
+                      TyrePanel, replay_years)
 
-SETTINGS = data.APP_DIR / 'dashboard.json'  # own file: the tray app rewrites config.json whenever it saves
 SPEEDS = (1, 5, 10, 30, 60)
 ACCENT = '#E10600'
 CHEVRON = (Path(__file__).parent / 'chevron.svg').as_posix()
@@ -58,95 +61,134 @@ QSlider::groove:horizontal {{ height: 4px; background: #252934; border-radius: 2
 QSlider::sub-page:horizontal {{ background: {ACCENT}; border-radius: 2px; }}
 QSlider::handle:horizontal {{ background: #ECEDF1; width: 14px; margin: -5px 0; border-radius: 7px; }}
 QDialog, QListWidget {{ background: #121419; color: #ECEDF1; }}
+QLabel#popup {{ background: #1C1F27; color: #ECEDF1; border: 1px solid {ACCENT}; border-radius: 10px;
+                padding: 10px 12px; font: 10pt "Segoe UI"; }}
 QDialog QLabel {{ color: #C9CCD6; }}
 QListWidget {{ border: 1px solid #252934; border-radius: 8px; }}
 '''
-VIEW = {'label_scale': 1.0, 'follow': None, 'delay': 0, 'replay_speed': 10}  # Settings… (saved in dashboard.json); follow None = everyone
 
 
 class Settings(QDialog):
-    """Applies every change at once, except the delay: that waits for Save (typing 45 over 40 would go through 4 s,
-    and dropping the delay lets out held data that can't be held back again: spoilers)."""
+    """Settings of the whole app (tray → Settings…, or the dashboard's). Applies every change at once, except the
+    delay: that waits for Save (typing 45 over 40 would go through 4 s, and dropping the delay lets out held data that
+    can't be held back again: spoilers)."""
 
-    def __init__(self, dash):
-        super().__init__(dash, windowTitle='Live settings')
-        self.dash = dash
+    def __init__(self, app):
+        super().__init__(None, windowTitle='Box Box settings')
+        self.app = app
+        self.setWindowIcon(icon())
+        self.setStyleSheet(STYLE)
+        self.resize(460, 720)
         form = QFormLayout(self)
-        size = QSpinBox(minimum=50, maximum=300, singleStep=10, suffix=' %', value=round(dash.cfg['label_scale'] * 100))
-        size.valueChanged.connect(lambda v: dash.set_view('label_scale', v / 100))
+        size = QSpinBox(minimum=50, maximum=300, singleStep=10, suffix=' %', value=round(app.cfg['label_scale'] * 100))
+        size.valueChanged.connect(lambda v: app.set('label_scale', v / 100))
         form.addRow('Driver names on the map', size)
-        self.delay = QSpinBox(minimum=0, maximum=600, suffix=' s', value=dash.cfg['delay'])
+        self.delay = QSpinBox(minimum=0, maximum=600, suffix=' s', value=app.cfg['delay'])
         self.save_delay = QPushButton('Save', enabled=False)
-        self.delay.valueChanged.connect(lambda v: self.save_delay.setEnabled(v != dash.cfg['delay']))
-        self.save_delay.clicked.connect(lambda: (dash.set_view('delay', self.delay.value()), self.save_delay.setEnabled(False)))
+        self.delay.valueChanged.connect(lambda v: self.save_delay.setEnabled(v != app.cfg['delay']))
+        self.save_delay.clicked.connect(lambda: (app.set('delay', self.delay.value()), self.save_delay.setEnabled(False)))
         row = QHBoxLayout()
         row.addWidget(self.delay, 1)
         row.addWidget(self.save_delay)
         form.addRow('Delay live data', row)
         hint = QLabel('Live timing runs ahead of the F1 TV video. Set the delay so overtakes show on the map when you '
-                      'see them on the stream (no spoilers). Live only, not replays.', wordWrap=True)
+                      'see them on the stream (no spoilers), or press ⏱ Sync on the dashboard as the lap counter on '
+                      'TV changes. Live only, not replays.', wordWrap=True)
         hint.setStyleSheet('color: #888')
         form.addRow(hint)
         speed = QComboBox()
         speed.addItems([f'{s}x' for s in SPEEDS])
-        speed.setCurrentText(f"{dash.cfg['replay_speed']}x")
-        speed.currentTextChanged.connect(lambda t: dash.set_view('replay_speed', int(t[:-1])))
+        speed.setCurrentText(f"{app.cfg['replay_speed']}x")
+        speed.currentTextChanged.connect(lambda t: app.set('replay_speed', int(t[:-1])))
         form.addRow('Replays start at', speed)
-        self.list = QListWidget()
-        self.list.itemChanged.connect(self.picked)
-        form.addRow('Show names for', self.list)
+
+        self.drivers = QTableWidget(0, 3)
+        self.drivers.setHorizontalHeaderLabels(['Driver', 'Follow', 'Alerts'])
+        self.drivers.verticalHeader().hide()
+        self.drivers.horizontalHeader().setSectionResizeMode(0, QHeaderView.Stretch)
+        self.drivers.itemChanged.connect(self.picked)
+        form.addRow(QLabel('<b>My drivers</b>: highlighted on the map and in the timing, a battle card each, and '
+                           'alerts for the ones ticked under Alerts', wordWrap=True))
+        form.addRow(self.drivers)
+        self.team, self.team_alerts = QComboBox(), QCheckBox('Team alerts')
+        self.team.currentTextChanged.connect(lambda t: self.set_team(name=None if t == '(none)' else t))
+        self.team_alerts.toggled.connect(lambda on: self.set_team(alerts=on))
         row = QHBoxLayout()
-        for text, on in (('All', True), ('None', False)):
-            b = QPushButton(text)
-            b.clicked.connect(lambda _=0, on=on: self.check_all(on))
-            row.addWidget(b)
-        form.addRow('', row)
+        row.addWidget(self.team, 1)
+        row.addWidget(self.team_alerts)
+        form.addRow('My team', row)
+        form.addRow(QLabel('<b>Alerts</b> (races and sprints): a popup on the dashboard while it is open, '
+                           'else a Windows notification', wordWrap=True))
+        self.kinds = {}
+        for k, label in ALERTS.items():
+            box = self.kinds[k] = QCheckBox(label)
+            box.toggled.connect(lambda on, k=k: app.set('alerts', {**app.cfg['alerts'], k: on}))
+            form.addRow(box)
         self.fill()
 
     def fill(self):
-        """Drivers of the session on screen (plus any picked earlier that aren't in it)."""
-        st, follow = self.dash.state, self.dash.cfg['follow']
-        self.delay.setValue(self.dash.cfg['delay'])  # drops a value typed but never saved
-        dl = {n: i for n, i in (st.d.get('DriverList', {}) if st else {}).items() if isinstance(i, dict) and i.get('Tla')}
-        rows = sorted((i['Tla'], i.get('FullName', '')) for i in dl.values())
-        rows += [(c, '') for c in follow or () if c not in {r[0] for r in rows}]
-        self.list.blockSignals(True)
-        self.list.clear()
-        for code, name in rows:
-            it = QListWidgetItem(f'{code}   {name.title()}'.strip())
-            it.setData(Qt.UserRole, code)
-            it.setFlags(it.flags() | Qt.ItemIsUserCheckable)
-            it.setCheckState(Qt.Checked if follow is None or code in follow else Qt.Unchecked)
-            self.list.addItem(it)
-        if not rows:
-            self.list.addItem('Go live or start a replay to list the drivers')
-        self.list.blockSignals(False)
+        """Drivers and teams of the session on screen, else of the standings (plus my drivers not in either)."""
+        app, st = self.app, self.app.state
+        self.delay.setValue(app.cfg['delay'])  # drops a value typed but never saved
+        dl = [i for i in (st.d.get('DriverList', {}) if st else {}).values() if isinstance(i, dict) and i.get('Tla')]
+        standings = app.static.get('drivers') if isinstance(app.static.get('drivers'), list) else []
+        rows = {i['Tla']: (i.get('FullName', '').title(), i.get('TeamName', '')) for i in dl} or \
+            {d['code']: (d['name'], d['team']) for d in standings}
+        mine = {d['code']: d for d in app.cfg['my_drivers']}
+        rows.update({c: ('', '') for c in mine if c not in rows})
+        self.drivers.blockSignals(True)
+        self.drivers.setRowCount(len(rows))
+        for i, (code, (name, team)) in enumerate(sorted(rows.items(), key=lambda kv: (kv[1][1], kv[0]))):
+            label = QTableWidgetItem(f'{code}   {name}'.strip())
+            label.setData(Qt.UserRole, code)
+            label.setFlags(Qt.ItemIsEnabled)
+            self.drivers.setItem(i, 0, label)
+            for col, on in ((1, code in mine), (2, mine.get(code, {}).get('alerts', False))):
+                box = QTableWidgetItem()
+                box.setFlags(Qt.ItemIsEnabled | Qt.ItemIsUserCheckable)
+                box.setCheckState(Qt.Checked if on else Qt.Unchecked)
+                self.drivers.setItem(i, col, box)
+        self.drivers.blockSignals(False)
+        teams = sorted({t for _, t in rows.values() if t} | {app.cfg['my_team']['name']} - {None})
+        for w in (self.team, self.team_alerts, *self.kinds.values()):
+            w.blockSignals(True)
+        self.team.clear()
+        self.team.addItems(['(none)'] + teams)
+        self.team.setCurrentText(app.cfg['my_team']['name'] or '(none)')
+        self.team_alerts.setChecked(app.cfg['my_team']['alerts'])
+        for k, box in self.kinds.items():
+            box.setChecked(app.cfg['alerts'].get(k, True))
+        for w in (self.team, self.team_alerts, *self.kinds.values()):
+            w.blockSignals(False)
 
-    def items(self):
-        return [self.list.item(i) for i in range(self.list.count()) if self.list.item(i).data(Qt.UserRole)]
+    def picked(self, item):
+        """Alerts ticked on a driver not followed: follows them too. Follow unticked: alerts off too."""
+        t = self.drivers
+        t.blockSignals(True)
+        if item.column() == 2 and item.checkState() == Qt.Checked:
+            t.item(item.row(), 1).setCheckState(Qt.Checked)
+        if item.column() == 1 and item.checkState() == Qt.Unchecked:
+            t.item(item.row(), 2).setCheckState(Qt.Unchecked)
+        t.blockSignals(False)
+        old = [d['code'] for d in self.app.cfg['my_drivers']]
+        rows = {t.item(i, 0).data(Qt.UserRole): i for i in range(t.rowCount())}
+        on = lambda code, col: t.item(rows[code], col).checkState() == Qt.Checked
+        keep = [c for c in old if c in rows and on(c, 1)] + [c for c in rows if on(c, 1) and c not in old]  # order kept
+        self.app.set('my_drivers', [{'code': c, 'alerts': on(c, 2)} for c in keep] +
+                     [d for d in self.app.cfg['my_drivers'] if d['code'] not in rows])
 
-    def check_all(self, on):
-        self.list.blockSignals(True)
-        for it in self.items():
-            it.setCheckState(Qt.Checked if on else Qt.Unchecked)
-        self.list.blockSignals(False)
-        self.picked()
-
-    def picked(self, *_):
-        items = self.items()
-        codes = [it.data(Qt.UserRole) for it in items if it.checkState() == Qt.Checked]
-        self.dash.set_view('follow', None if len(codes) == len(items) else codes)  # all ticked: new drivers show too
+    def set_team(self, **kw):
+        self.app.set('my_team', {**self.app.cfg['my_team'], **kw})
 
 
 class Dashboard(QMainWindow):
-    def __init__(self):
+    def __init__(self, app):
         super().__init__()
-        cfg = load_config()  # read-only here: sim knobs and the F1 TV preference
-        self.cfg = {**cfg, **VIEW, 'widgets': {k: {'n': 22 if k == 'tower' else 0}
-                                               for k in ('map', 'tower', 'sim', 'stints', 'rc', 'sectors', 'tyres')}}
-        self.settings = None
-        self.state, self.static, self.signed_in = None, {}, None
-        self.setWindowTitle('F1 live')
+        self.app = app
+        # the docked panels' row counts are the dashboard's own; everything else is the app's config
+        self.cfg = collections.ChainMap({'widgets': {k: {'n': 22 if k == 'tower' else 0} for k in (
+            'map', 'tower', 'sim', 'stints', 'rc', 'sectors', 'tyres', 'battles')}}, app.cfg)
+        self.setWindowTitle('Box Box')
         self.setWindowIcon(icon())
         self.setStyleSheet(STYLE)
 
@@ -154,11 +196,12 @@ class Dashboard(QMainWindow):
         # Race control appears in both, so there are two of it (a Qt widget has one parent).
         self.map = TrackMap(self, 'map', self)
         self.tower, self.stints = TimingTower(self, 'tower', self), StintPanel(self, 'stints', self)
-        self.sim, self.rc = SimPanel(self, 'sim', self), RaceControl(self, 'rc', self)
+        self.sim, self.rc, self.battles = SimPanel(self, 'sim', self), RaceControl(self, 'rc', self), BattlePanel(self, 'battles', self)
         self.sectors, self.tyres, self.rc2 = SectorTower(self, 'sectors', self), TyrePanel(self, 'tyres', self), RaceControl(self, 'rc', self)
         self.top_tabs, self.bottom_tabs = QTabWidget(documentMode=True), QTabWidget(documentMode=True)
         self.top_tabs.addTab(self.tower, 'TIMING')
         self.top_tabs.addTab(self.stints, 'TYRE STINTS')
+        self.top_tabs.addTab(self.battles, 'BATTLES')
         self.bottom_tabs.addTab(self.sim, 'STRATEGY SIM')
         self.bottom_tabs.addTab(self.rc, 'RACE CONTROL')
         self.race_split = QSplitter(Qt.Vertical)
@@ -183,19 +226,23 @@ class Dashboard(QMainWindow):
 
         bar = QToolBar(movable=False)
         self.addToolBar(bar)
-        bar.addWidget(QLabel(f"<span style='color:{ACCENT}'>▰</span> F1 LIVE", objectName='brand'))
-        self.live_btn = bar.addAction('● Go live', self.start_live)
+        bar.addWidget(QLabel(f"<span style='color:{ACCENT}'>▰</span> BOX BOX", objectName='brand'))
+        self.live_btn = bar.addAction('● Go live', self.go_live)
         bar.widgetForAction(self.live_btn).setObjectName('live')
         rp = QToolButton(text='Replay', popupMode=QToolButton.InstantPopup)
         self.replay_menu = QMenu(rp)
         self.replay_menu.aboutToShow.connect(self.build_replay_menu)
         rp.setMenu(self.replay_menu)
         bar.addWidget(rp)
-        bar.addAction('■ Stop', self.stop_feed)
+        bar.addAction('■ Stop', app.stop_feed)
         bar.addSeparator()
         self.signin = bar.addAction('Sign in to F1 TV…', self.sign_in)
         self.signin.setToolTip(live.SIGNIN_HELP)
-        bar.addAction('Settings…', self.open_settings)
+        bar.addAction('Settings…', app.open_settings)
+        self.sync = bar.addAction('⏱ Sync delay', self.sync_delay)
+        self.sync.setToolTip('Press (or S) the moment the lap counter on the F1 TV stream changes: the live data delay '
+                             'is set to match the stream')
+        QShortcut(QKeySequence('S'), self, self.sync_delay)
         spacer = QWidget()
         spacer.setSizePolicy(QSizePolicy.Expanding, QSizePolicy.Preferred)
         bar.addWidget(spacer)
@@ -224,41 +271,70 @@ class Dashboard(QMainWindow):
         rb.addWidget(self.speed_box)
         rb.hide()
         self.resume_speed, self.last_step = None, None  # speed to go back to after a pause
+        self.popups = []  # alerts on screen, newest at the bottom
 
         self.restore()
         self.timer = QTimer(self, timeout=self.tick, interval=500)
         self.timer.start()
-        bg(live.token_ok, self.got_token)
-        QTimer.singleShot(0, self.start_live)  # launched during a session: go straight to live
+        self.got_token(app.static.get('signed_in'))
+        self.tick()
+
+    # the app's live session or replay, standings and sim knobs (the panels read them through here)
+    state = property(lambda self: self.app.state)
+    static = property(lambda self: self.app.static)
 
     def model(self):
-        """Sim knobs for the session's season (its regulation era's calibration), config overrides on top."""
-        year = self.state and self.state.season()
-        return sim.season_model(year or max(sim.SEASONS), self.cfg['model'])
+        return self.app.model()
 
     # ---- feeds -----------------------------------------------------------------------------------------------------
-    def start_live(self, keep=False):
-        """keep=True reconnects into the same State (after F1 TV sign-in), so laps logged so far stay for the sim."""
-        old = self.state
-        if old and old.feed:
-            old.feed.stop = True
-        if not (keep and old):
-            self.state = live.State()
-        self.state.delay = self.cfg['delay']
-        live.LiveFeed(self.state, auth=self.cfg.get('live_auth', True), record=True).start()
+    def go_live(self):
+        """Back to the live session if a replay is on, else connect now (outside the session windows too)."""
+        if self.app.live:
+            if self.app.state is not self.app.live:
+                self.app.stop_feed()
+        else:
+            self.app.go_live(manual=True)
 
     def start_replay(self, path):
-        self.stop_feed()
-        self.state = live.State()
-        live.ReplayFeed(self.state, path, float(self.cfg['replay_speed'])).start()
+        self.app.start_replay(path)
 
-    def stop_feed(self):
-        if self.state and self.state.feed:
-            self.state.feed.stop = True
-        self.state = None
+    def sync_delay(self):
+        st = self.app.live
+        d = st and st.sync_delay(time.time(), self.app.cfg['delay'])
+        if d is None:
+            self.popup('Sync delay', 'Live races and sprints only, once the lap counter has changed live.')
+            return
+        self.app.set('delay', d)
+        self.popup('Sync delay', f'Live data now runs {d} s behind, matching the stream.')
+
+    def popup(self, title, text):
+        """An alert in the top-right corner for 12 s; several stack."""
+        note = QLabel(f'<b>{html.escape(title)}</b><br>{html.escape(text)}', self, wordWrap=True, objectName='popup')
+        note.setFixedWidth(380)
+        note.adjustSize()
+        self.popups.append(note)
+        note.show()
+        self.place_popups()
+
+        def gone():
+            if note in self.popups:
+                self.popups.remove(note)
+                note.deleteLater()
+                self.place_popups()
+        QTimer.singleShot(12000, gone)
+
+    def place_popups(self):
+        y = self.centralWidget().y() + 14
+        for n in self.popups:
+            n.move(self.width() - n.width() - 24, y)
+            n.raise_()
+            y += n.height() + 8
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self.place_popups()
 
     def bring_to_front(self):
-        """Launched again: show this window instead of a second dashboard with a second live connection."""
         self.setWindowState(self.windowState() & ~Qt.WindowMinimized)
         self.show()
         self.raise_()
@@ -330,8 +406,7 @@ class Dashboard(QMainWindow):
 
     # ---- F1 TV ---------------------------------------------------------------------------------------------------
     def got_token(self, ok):
-        self.signed_in = ok is True
-        self.signin.setText('F1 TV: signed in ✓ (sign in again…)' if self.signed_in else 'Sign in to F1 TV…')
+        self.signin.setText('F1 TV: signed in ✓ (sign in again…)' if ok is True else 'Sign in to F1 TV…')
 
     def sign_in(self):
         self.signin.setEnabled(False)
@@ -340,44 +415,30 @@ class Dashboard(QMainWindow):
         def done(ok):
             self.signin.setEnabled(True)
             self.got_token(ok)
-            if ok is True and self.state and isinstance(self.state.feed, live.LiveFeed):
-                self.start_live(keep=True)  # reconnect with the token: real GPS positions
-            elif ok is not True:
+            if ok is not True:
                 self.signin.setText(f'F1 TV sign-in failed: {ok}. Try again…')
-        bg(live.sign_in, done)
-
-    # ---- settings --------------------------------------------------------------------------------------------------
-    def open_settings(self):
-        if not self.settings:
-            self.settings = Settings(self)
-        self.settings.fill()
-        self.settings.show()
-        self.settings.raise_()
-
-    def set_view(self, key, value):
-        self.cfg[key] = value
-        if key == 'delay' and self.state:
-            self.state.delay = value
-        self.save()
-        self.map.update()
+        self.app.sign_in(done)
 
     # ---- UI --------------------------------------------------------------------------------------------------------
     def tick(self):
-        if self.state:
-            self.state.pump()
+        """Every 0.5 s (the app pumps the feeds)."""
         kind = self.state.session()['type'] if self.state else ''
         if kind:  # unknown until SessionInfo arrives: keep the current layout
             self.pages.setCurrentWidget(self.race_split if kind in ('Race', 'Sprint') else self.quali_split)
-        for w in (self.map, self.tower, self.stints, self.sim, self.rc, self.sectors, self.tyres, self.rc2):
+        for w in (self.map, self.tower, self.stints, self.battles, self.sim, self.rc, self.sectors, self.tyres, self.rc2):
             if w.isVisible():  # hidden tabs and the other layout catch up when shown (next tick, 0.5 s)
                 w.tick()
+        on_live = self.app.live and self.state is self.app.live
+        self.sync.setVisible(bool(on_live) and self.state.session()['type'] in ('Race', 'Sprint'))
+        self.live_btn.setText('● Back to live' if self.app.live else '● Go live')
+        self.live_btn.setVisible(not on_live)
         self.show_chips()
         self.update_replay_bar()
 
     def status_text(self):
         st = self.state
         if not st:
-            return 'Not connected. ● Go live during a session, or pick a Replay.'
+            return 'Not live. Goes live by itself around every session, or ● Go live / pick a Replay.'
         feed = getattr(st.feed, 'status', '')
         if isinstance(st.feed, live.LiveFeed) and not st.d.get('SessionInfo'):
             return f'{feed} · connected, waiting for session data (F1 only sends data while a session is on)'
@@ -388,6 +449,8 @@ class Dashboard(QMainWindow):
         if w:
             parts.append(f"air {w.get('AirTemp', '?')}° · track {w.get('TrackTemp', '?')}°"
                          + (' · RAIN' if str(w.get('Rainfall')) == '1' else ''))
+        if self.app.live and st is not self.app.live:
+            parts.append('live recording')
         return ' · '.join(p for p in parts if p)
 
     def show_chips(self):
@@ -423,36 +486,23 @@ class Dashboard(QMainWindow):
             w.restoreState(dec(k))  # missing or from an older layout: keeps the default sizes
         self.top_tabs.setCurrentIndex(int(saved.get('top_tab', 0)))
         self.bottom_tabs.setCurrentIndex(int(saved.get('bottom_tab', 0)))
-        self.cfg.update({k: saved[k] for k in VIEW if k in saved})
 
     def splitters(self):
         return {'split': self.split, 'race_split': self.race_split, 'quali_split': self.quali_split,
                 'quali_bottom': self.quali_bottom}
 
     def save(self):
-        data.APP_DIR.mkdir(parents=True, exist_ok=True)
+        SETTINGS.parent.mkdir(parents=True, exist_ok=True)
         enc = lambda b: bytes(b.toBase64()).decode()
         SETTINGS.write_text(json.dumps({'geometry': enc(self.saveGeometry()),
                                         **{k: enc(w.saveState()) for k, w in self.splitters().items()},
-                                        'top_tab': self.top_tabs.currentIndex(), 'bottom_tab': self.bottom_tabs.currentIndex(),
-                                        **{k: self.cfg[k] for k in VIEW}}))
+                                        'top_tab': self.top_tabs.currentIndex(), 'bottom_tab': self.bottom_tabs.currentIndex()}))
 
     def closeEvent(self, e):
+        """Only the window closes: the tray, widgets and live feed carry on. The radio model's memory goes back."""
         self.save()
-        self.stop_feed()
+        self.timer.stop()
+        radio.release()
+        self.app.dash = None
+        self.deleteLater()
         super().closeEvent(e)
-
-
-def main():
-    console_to_file('live')
-    qapp = QApplication(sys.argv)
-    if already_running(INSTANCE):
-        return
-    qapp.dash = Dashboard()  # keep a reference
-    qapp.dash.server = listen(INSTANCE, qapp.dash.bring_to_front)
-    qapp.dash.show()
-    sys.exit(qapp.exec())
-
-
-if __name__ == '__main__':
-    main()

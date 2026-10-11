@@ -1,6 +1,6 @@
-# F1 Tracker — correctness fixes + feature plan
+# Box Box (was F1 Tracker) — correctness fixes + feature plan
 
-**Status (2026-10-09):** Groups 1–2 done; Group 3 items 11–14 done, item 10 to be built and tested live on the Singapore weekend (9–11 Oct). Also done on request: SC / VSC / red flag in the sim, per-era calibration (merged, PR #2), dashboard restyle, off-screen widget fix, live countdown. Next: Group 4, then Group 5. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-11):** Groups 1–2 done; Group 3 done (item 10 by the schedule, not yet tested live; no on/off switch or late-start check yet). Group 4: 16 done, 15 partly (one Settings dialog, sim knobs still JSON), 15b and 17 to do. Group 5: 20 done, 19 partly (no cache tests), 18 and 21 to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.
@@ -21,12 +21,19 @@
 - **2026-10-06, replays back to 2018.** The archive starts in 2018. F1 refuses most of 2022 (403), so archive requests fall back to FastF1's mirror.
 - **2026-10-06, sim calibrated per regulation era (2018–21, 2022–25, 2026–), user's call.** Each era is a different car, so one fit for all is wrong. Season facts (min mass, start fuel, restart DRS laps) are set per year on top.
 - **2026-10-06, SC out now from race control's structured fields.** The sim needs to know an SC is coming in, so `State.neutral` reads `Category: SafetyCar` + `Status: IN THIS LAP`, not free text. The slow-lap check above still finds neutral laps for pit loss.
+- **2026-10-11, after the Singapore race:**
+  - `PitStopSeries` is not sent live even with F1 TV (checked during the race). Live pit stops come from the lap pit flags.
+  - **Pit loss: the race's own stops first** (from the third), before MultiViewer's value. Reverses the order above: on 799 green-flag stops of 2025–26 (`scripts/validate_pit_blend.py`) the loss was 0.84 s off instead of 1.18 s, the rejoin 1.30 places off instead of 1.35; blends did no better. Singapore: published 27.6 s, measured 24.2 s.
+  - **Tray and dashboard became one app** (user's call): one live connection, one recording, one settings file; alerts need to know whether the dashboard is open.
+  - **Item 10 by the schedule**, not by polling `StreamingStatus.json`: live from 10 min before each session to 30 min after. Simpler and enough for the schedule we have; a session that overruns by more than 30 min is the known gap.
+  - **Sim fit keeps traffic laps** for a driver who'd have fewer than 3 laps without them (Bahrain 2026: HAM P9 simulated at P21). All eras better out of sample (2026 position error 1.21 → 1.13).
+  - **Renamed Box Box** (user's choice), repo `soham2121/box-box`.
 - **2026-10-07, fitted "who pits under SC/VSC" model kept (user's call).** Out of sample it loses 0.02–0.05 places of mean error to a worn-tyre rule but wins on log score, pit/no-pit calibration and the spread of stops per SC. The user prefers realistic distributions to a slightly better mean.
 
 ## Context
 The user's spec lists 20 items in 5 priority groups. Most urgent: the strategy sim gives nonsense at Bahrain 2026. Pit loss shows 105 s instead of about 22 s, so the panel says "rejoin P19" and "loses 12.98 places". Work runs group by group. After each group: update the docs, give a summary and a full manual test plan, then **stop and wait for the user**. **No git commits** (the user commits).
 
-Codebase: `f1tracker/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 lines). `.venv` is installed (Python 3.11, fastf1 3.8.3, PySide6 6.11.2).
+Codebase: `boxbox/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 lines). `.venv` is installed (Python 3.11, fastf1 3.8.3, PySide6 6.11.2).
 
 ## Facts verified during planning (read-only probes + web)
 - **Bahrain root cause.**
@@ -56,7 +63,7 @@ Codebase: `f1tracker/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 li
 2. Implement with the smallest diff that fits the current architecture. Keep network work off the UI thread, and keep the cache, IPv4-first and config compatibility.
 3. Validate:
    - `pytest`
-   - `python -m f1tracker.sim` (Azerbaijan backtest; lap MAE must stay ≤ 0.36 s)
+   - `python -m boxbox.sim` (Azerbaijan backtest; lap MAE must stay ≤ 0.36 s)
    - multi-race backtest (from group 2)
    - offscreen Bahrain replay smoke script
    - app launch check
@@ -125,10 +132,10 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Lapped cars yield (blue flags).
   - Pit/SC states respected.
   - Still O(D) per lap.
-- **9. Calibration.** `python -m f1tracker.calibrate` runs across N archived races (2026 + 2025):
+- **9. Calibration.** `python -m boxbox.calibrate` runs across N archived races (2026 + 2025):
   - Fits `sc_prob`/`sc_laps`/VSC rate from TrackStatus, SC/VSC pit-loss ratios from MultiViewer, and pass parameters from observed position changes.
   - Leave-one-race-out validation.
-  - Writes `f1tracker/calibration.json`, which config `model` overrides still beat.
+  - Writes `boxbox/calibration.json`, which config `model` overrides still beat.
   - Multi-race backtest table: lap MAE, rank correlation, rejoin error.
 
 ## Group 3 — Live / data
@@ -152,11 +159,11 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Saves to the existing `cfg['model']` keys and applies immediately (`App.model()` is already read per run).
   - Replaces the `open_config` JSON hack (main.py:227).
 - **16. Desktop layer.** Research and test the WorkerW/Progman `SetParent` via ctypes on build 26200, keeping dragging, resizing and saved positions. If Windows blocks it: explain, keep on-top mode, and offer a re-show-after-Win+D fallback. **Ask the user if neither works acceptably.**
-- **17. Logging.** `f1tracker/log.py`:
-  - `RotatingFileHandler` to `%APPDATA%\f1tracker\logs\f1tracker.log` (1 MB × 5), plus a console handler when not frozen.
+- **17. Logging.** `boxbox/log.py`:
+  - `RotatingFileHandler` to `%APPDATA%\boxbox\logs\boxbox.log` (1 MB × 5), plus a console handler when not frozen.
   - `bg()` logs exceptions with tracebacks. The prints in live.py are replaced.
   - Tokens are never logged.
-- **(15-auth)** All FastF1 private auth calls move into one `f1tracker/auth.py` with try/except and clear user messages, so the app does not crash if FastF1 internals change. The live feed avoids `get_auth_token()`'s blocking re-auth by checking token expiry before connecting.
+- **(15-auth)** All FastF1 private auth calls move into one `boxbox/auth.py` with try/except and clear user messages, so the app does not crash if FastF1 internals change. The live feed avoids `get_auth_token()`'s blocking re-auth by checking token expiry before connecting.
 
 ## Group 5 — Distribution
 - **18. requirements.txt.** Direct deps only: `fastf1==3.8.3` (pinned for the private API), PySide6, numpy, scipy, requests, with tested lower bounds.
@@ -164,24 +171,24 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Data cache (fresh, stale refresh, offline → stale fallback, mocked `requests`).
   - Sim (deg, tyre changes, SC, VSC, wet, two-compound rule, race completes).
   - Replay (starts, speed timing, finishes) with fake message lists.
-- **20. Start with Windows.** HKCU `...\CurrentVersion\Run` value via stdlib `winreg` (no admin); `pythonw -m f1tracker.main` or the frozen exe path. Off by default, tray/settings toggle.
+- **20. Start with Windows.** HKCU `...\CurrentVersion\Run` value via stdlib `winreg` (no admin); `pythonw -m boxbox.main` or the frozen exe path. Off by default, tray/settings toggle.
 - **21. Packaging.**
-  - PyInstaller one-dir windowed `f1tracker.spec` + `build.ps1`.
+  - PyInstaller one-dir windowed `boxbox.spec` + `build.ps1`.
   - Research FastF1/PySide6/signalrcore hidden imports, and the browser-auth callback in a frozen build.
-  - Build and launch the exe. Config/cache/logs stay in `%APPDATA%\f1tracker`.
+  - Build and launch the exe. Config/cache/logs stay in `%APPDATA%\boxbox`.
 
 ## Critical files
-- `f1tracker/sim.py`: pit_loss_from, simulate, rejoin, gap_s, MODEL, backtest
-- `f1tracker/live.py`: State._timing/_lap/apply, ReplayFeed.TOPICS, Track.bounds, load_track, sign-in
-- `f1tracker/widgets.py`: DriverStandings.projected, SimPanel.loss/tick, TimingTower, TrackMap
-- `f1tracker/main.py`: App menu, config, timers
-- `f1tracker/data.py`: Jolpica helpers, past_sessions, circuit
-- New: `tests/`, `scripts/smoke_replay.py`, `f1tracker/calibrate.py`, `f1tracker/log.py`, `f1tracker/auth.py`, `docs/*.md`, `requirements-dev.txt`, `f1tracker.spec`, `build.ps1`
+- `boxbox/sim.py`: pit_loss_from, simulate, rejoin, gap_s, MODEL, backtest
+- `boxbox/live.py`: State._timing/_lap/apply, ReplayFeed.TOPICS, Track.bounds, load_track, sign-in
+- `boxbox/widgets.py`: DriverStandings.projected, SimPanel.loss/tick, TimingTower, TrackMap
+- `boxbox/main.py`: App menu, config, timers
+- `boxbox/data.py`: Jolpica helpers, past_sessions, circuit
+- New: `tests/`, `scripts/smoke_replay.py`, `boxbox/calibrate.py`, `boxbox/log.py`, `boxbox/auth.py`, `docs/*.md`, `requirements-dev.txt`, `boxbox.spec`, `build.ps1`
 
 ## Verification (every group)
 - `.venv\Scripts\python -m pytest -q` (unit; `-m integration` for archive tests)
-- `.venv\Scripts\python -m f1tracker.sim`: Azerbaijan lap MAE ≤ 0.36, rejoin, rank correlation
-- From group 2: `python -m f1tracker.calibrate --report` (multi-race metrics table)
+- `.venv\Scripts\python -m boxbox.sim`: Azerbaijan lap MAE ≤ 0.36, rejoin, rank correlation
+- From group 2: `python -m boxbox.calibrate --report` (multi-race metrics table)
 - `PYTHONPATH=. python scripts/smoke_replay.py`: Bahrain lap-11 pit loss, rejoin, what-if, tower, map, standings
-- Launch `python -m f1tracker.main` for real and confirm the tray and widgets come up, then quit.
+- Launch `python -m boxbox.main` for real and confirm the tray and widgets come up, then quit.
 - Untestable now, to be listed each time: live session (next is Singapore FP1, Oct 9), F1 TV login, Win+D on other Windows builds.

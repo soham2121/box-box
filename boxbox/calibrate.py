@@ -1,9 +1,10 @@
 """Strategy-sim calibration over archived races, one fit per regulation era (sim.ERAS), with a leave-one-race-out
 backtest. Each era is a different car, so no era borrows another's numbers.
 
-Run: .venv\\Scripts\\python -m f1tracker.calibrate [years...] [--write]
-  years pick the eras to fit (default: every era, all its seasons). --write stores them in f1tracker/calibration.json
+Run: .venv\\Scripts\\python -m boxbox.calibrate [years...] [--write]
+  years pick the eras to fit (default: every era, all its seasons). --write stores them in boxbox/calibration.json
   under "eras"; sim.season_model() applies the session's era (config.json "model" overrides still win).
+  --json PATH writes the fitted eras, with their backtest means, to PATH instead (the app's refit after each race).
 
 Fitted per era from its races:
   sc_per_race, sc_laps, vsc_per_race, vsc_laps   TrackStatus episodes during the race (4 = SC, 6/7 = VSC)
@@ -372,8 +373,14 @@ def fit_era(name, years):
     return cal, [r['label'] for r in rs], rows
 
 
+def means(rows):
+    """The leave-one-out backtest's calibrated means, as stored with a fit ('_scores')."""
+    return {k: round(float(np.nanmean([row[2][k] for row in rows])), 4) for k in rows[0][2]}
+
+
 def main(argv):
     write = '--write' in argv
+    out = Path(argv[argv.index('--json') + 1]) if '--json' in argv else None
     now = data.datetime.now(data.timezone.utc).year
     asked = {int(a) for a in argv if a.isdigit()}
     eras = {sim.era(y) for y in asked} if asked else set(sim.ERAS)
@@ -388,7 +395,9 @@ def main(argv):
         years = [y for y in range(max(a, data.FIRST_ARCHIVE_YEAR), min(b, now) + 1) if not asked or y in asked]
         got = fit_era(name, years)
         if got:
-            saved[name] = {'_fitted_on': got[1], **got[0]}
+            saved[name] = {'_fitted_on': got[1], '_scores': means(got[2]), **got[0]}
+    if out:
+        out.write_text(json.dumps({'eras': {k: saved[k] for k in eras if k in saved}}, indent=1))
     if write:
         OUT.write_text(json.dumps({'eras': saved}, indent=1))
         print('wrote', OUT)
