@@ -1,7 +1,8 @@
 import numpy as np
 import pytest
 
-from f1tracker import calibrate, sim
+from conftest import make_race
+from boxbox import calibrate, sim
 
 
 def model(total=10, base=None, **knobs):
@@ -139,3 +140,41 @@ def test_no_clean_laps_yet_takes_the_level_of_the_laps_seen():
              'pos': i + 1, 'gap': 2.0 * i} for n in range(2, 6) for i, d in enumerate('AB')]
     f = sim.fit(laps, 20, sim.DEFAULTS)
     assert abs(sim.predict(f, 'A', 6, 'INTERMEDIATE', 6) - 150.0 / sim.DEFAULTS['sc_lap_factor']) < 2
+
+
+def test_stops_owed_counts_tyre_life_and_the_two_compound_rule():
+    m = {**sim.MODEL, 'life': {'SOFT': 20, 'MEDIUM': 30, 'HARD': 40}, 'two_compounds': True}
+    d = lambda cmp, age, used: {'cmp': cmp, 'age': age, 'used': set(used)}
+    assert sim.stops_owed(d('HARD', 10, ['MEDIUM']), 20, m) == 0  # rule done, the set lasts
+    assert sim.stops_owed(d('MEDIUM', 10, []), 15, m) == 1  # lasts, but still owes another compound
+    assert sim.stops_owed(d('SOFT', 15, ['MEDIUM']), 50, m) == 2  # 5 laps left on it, then 45 on 40-lap hards
+    assert sim.stops_owed(d('INTERMEDIATE', 3, []), 30, m) == 0  # wet: the weather decides
+    assert sim.stops_owed(d('MEDIUM', 10, []), 15, {**m, 'two_compounds': False}) == 0  # sprint
+
+
+def test_battle_gap_net_of_stops_pace_and_catch():
+    laps = make_race(drivers=3, laps=20)  # driver i is 0.1 s/lap slower than driver i-1
+    ds = [{'drv': '1', 'code': 'AAA', 'pos': 1, 'gap': '', 'int': '', 'cmp': 'HARD', 'age': 10, 'used': {'MEDIUM'}, 'out': False},
+          {'drv': '2', 'code': 'BBB', 'pos': 2, 'gap': '+3.0', 'int': '+3.0', 'cmp': 'MEDIUM', 'age': 10, 'used': set(), 'out': False},
+          {'drv': '3', 'code': 'CCC', 'pos': 3, 'gap': '+3.8', 'int': '+0.8', 'cmp': 'HARD', 'age': 5, 'used': {'MEDIUM'}, 'out': False}]
+    b = sim.battle(ds, laps, '2', '1', 20, 30, 22.0)
+    assert b['gap'] == pytest.approx(-3.0) and b['owed'] == (1, 0)
+    assert b['net'] == pytest.approx(-3.0 - 22.0)  # BBB still has to stop: further behind once both have
+    assert b['edge'] == pytest.approx(-0.1) and b['catch'] is None  # slower: never catches
+    c = sim.battle(ds, laps, '2', '3', 20, 30, 22.0)
+    assert c['gap'] == pytest.approx(0.8) and c['close'] and c['net'] == pytest.approx(0.8 - 22.0)  # CCC ahead net
+    assert sim.battle(ds, laps, '3', '2', 20, 30, 22.0)['catch'] is None  # CCC is behind on track: nothing to catch
+    assert len(b['trend']) == 10
+    assert sim.real_rival(ds, laps, '2', 20, 30, 22.0)[0] == '3'
+
+
+def test_traffic_laps_kept_when_a_driver_has_few_others():
+    laps = make_race(drivers=4, laps=12)
+    for l in laps:  # driver 4 sat within 1 s of the car ahead from lap 3 on
+        if l['drv'] == '4' and l['lap'] >= 3:
+            l['int'] = 0.6
+        elif l['drv'] == '3':
+            l['int'] = 0.6 if l['lap'] == 5 else 2.0  # one lap in traffic among plenty without
+    kept = sim.clean(laps)
+    assert sum(l['drv'] == '4' for l in kept) == 11  # laps 2-12, all of them: only lap 2 was free
+    assert not any(l['drv'] == '3' and l['lap'] == 5 for l in kept)  # dropped: driver 3 has enough free laps

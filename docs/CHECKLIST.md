@@ -35,7 +35,7 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 - [x] App launches
 
 ## Added on request (2026-10-06): live dashboard
-- [x] `f1tracker/dashboard.py`: one window, big map left, timing tower top right, strategy sim bottom right, no standings
+- [x] `boxbox/dashboard.py`: one window, big map left, timing tower top right, strategy sim bottom right, no standings
 - [x] Connects live on launch; toolbar: Go live / Replay (+ speed) / Stop / Sign in to F1 TV; status line with session, lap, track status, weather
 - [x] F1 TV sign-in from the window, then reconnects with auth, keeping the State (laps logged so far)
 - [x] Widgets reusable as docked panels (`Widget(app, key, parent)`); map markers scale with size; label stacks capped at 4 (+N)
@@ -46,13 +46,13 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 - [x] `scripts/smoke_dashboard.py`
 
 ## Added on request (2026-10-06): desktop icons, split opacity
-- [x] `f1tracker/f1.ico` (256 px, same red F1 badge as the tray) + `scripts/create_shortcuts.ps1` → desktop shortcuts **F1 Live** and **F1 Tracker** (created on this PC)
+- [x] `boxbox/f1.ico` (256 px, same red F1 badge as the tray) + `scripts/create_shortcuts.ps1` → desktop shortcuts **F1 Live** and **F1 Tracker** (created on this PC)
 - [x] Opacity split into **Text opacity** (labels, controls, map drawing; via QGraphicsOpacityEffect) and **Background opacity** (painted alpha, min 1/255 so it stays draggable)
 - [x] Old `opacity` setting migrated: text = opacity, background = opacity × 225/255 (same look as before); `tests/test_config.py`
 
 ## Fixed 2026-10-06: F1 TV sign-in from shortcuts
 - [x] Root cause of `Could not connect to the local FastF1 application`: started from a shortcut (pythonw.exe), `sys.stderr` is None. FastF1's login server logs every request to stderr, so it crashed before replying to the extension. Reproduced, then fixed (quiet handler)
-- [x] stdout/stderr go to `%APPDATA%\f1tracker\tray.log` / `live.log` under pythonw, so nothing else can crash the same way
+- [x] stdout/stderr go to `%APPDATA%\boxbox\tray.log` / `live.log` under pythonw, so nothing else can crash the same way
 - [x] Login server waits 30 min (was 5), also listens on `::1` (the extension calls `localhost`), and a second click reuses the waiting server; clear failure reasons (timeout / no F1 TV subscription / token didn't verify)
 - [x] Single dashboard instance: a second launch brings the open window to the front
 
@@ -89,12 +89,12 @@ Plan and design notes: [PLAN.md](PLAN.md). Manual test steps per group: [TESTING
 - [x] Tests: clock, quali part / drop zone, estimated map with a stopped car
 
 ## Group 2 — Simulator
-Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pending). Scored by `python -m f1tracker.calibrate` (leave-one-race-out over the 21 races and sprints of 2026, see README).
+Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pending). Scored by `python -m boxbox.calibrate` (leave-one-race-out over the 21 races and sprints of 2026, see README).
 - [x] 5. Per-car tyre choice: cheapest dry compound to the flag (extra-stop penalty past its life), two-compound rule per car. **Sprints have free tyre choice** (verified: the rule only applies to Grands Prix); the sim used to force a stop in sprints. No set inventory (new vs used sets)
 - [x] 6. Wet / inters: `conditions` (DRY / WET, or from lap N), default holds what most cars are on. No forecast invented; the sim panel has "rain (inters) / track dries from lap N". Wrong tyres stop when the time lost to the flag beats the pit loss. `slick_wet_s` = 6.0 s, median of 69 laps in the 5 mixed races of 2025-26 (wide spread). Inters on a dry track: fitted offset (too few laps to measure). Full wets folded into WET (rare in races)
 - [x] 7. Lapped cars: gap = car ahead's gap + interval (seconds even when the gap reads "1L"); leader's median green lap only when the interval is in laps. Rejoin error 1.38 → 0.84 places over 303 stops. Fixed a crash: "6L" gaps raised ValueError in the old parser
 - [x] 8. Overtaking: within 1 s at the line (2026 Overtake Mode: +0.5 MJ when within 1 s at one detection point per lap; DRS before) the car behind gets past with P = sigmoid(a + b·pace edge + c·gap), fitted on real passes. Pit / SC / VSC laps excluded. Lapped cars never block (they sit a lap behind in race time). Dirty air not separate: it's in the fitted odds
-- [x] 9. Calibration **per regulation era** (2018–21, 2022–25, 2026–; user's call: each era is a different car): `f1tracker/calibrate.py`, `calibration.json` → `sim.season_model(year)` (defaults < season facts: min mass + start fuel per year, verified < era calibration < config). Also fits dry tyre offsets/wear and tyre life per era; 2018's seven compound names relabelled to the race's SOFT/MEDIUM/HARD. Leave-one-out per era: 2018–21 1.65→1.56 places, 2022–25 1.66→1.55, 2026 1.32→1.22. Own-era vs 2026 fit on 2025 races: 1.64 vs 1.67 (small). SC/VSC per race + length from TrackStatus, SC/VSC lap factors, pass odds. Lap-fit knobs checked on a 4×5 grid: current prior weight 3 / half-life 4 laps were already best (0.678 s). VSC added to the sim
+- [x] 9. Calibration **per regulation era** (2018–21, 2022–25, 2026–; user's call: each era is a different car): `boxbox/calibrate.py`, `calibration.json` → `sim.season_model(year)` (defaults < season facts: min mass + start fuel per year, verified < era calibration < config). Also fits dry tyre offsets/wear and tyre life per era; 2018's seven compound names relabelled to the race's SOFT/MEDIUM/HARD. Leave-one-out per era: 2018–21 1.65→1.56 places, 2022–25 1.66→1.55, 2026 1.32→1.22. Own-era vs 2026 fit on 2025 races: 1.64 vs 1.67 (small). SC/VSC per race + length from TrackStatus, SC/VSC lap factors, pass odds. Lap-fit knobs checked on a 4×5 grid: current prior weight 3 / half-life 4 laps were already best (0.678 s). VSC added to the sim
 
 ## Added on request (2026-10-06): SC / VSC / red flag in the sim
 - [x] An SC / VSC / red flag that's out now: `State.neutral` (TrackStatus 4/6/7/5, race control's SafetyCar "IN THIS LAP") → `State.neutral_now()` → sim starts under it with the laps it likely has left
@@ -127,10 +127,28 @@ Done 2026-10-06 on branch `sim-calibration` (pushed 2026-10-07, PR to `main` pen
 - [x] Tests: `onto_screen` (2 monitors, offset), `live_session`. 53 pass
 - [x] README: animated banner (`docs/banner.svg`, real Marina Bay outline from MultiViewer, SMIL so it plays on GitHub), badges, section links
 
+## Added on request (2026-10-11, after the Singapore race): one app, battles, alerts
+- [x] Map rubber-banding fixed: GPS samples timed by their own clock plus the quickest delivery seen (live messages arrived up to 1.2 s late). On 2 min of the Singapore race: 841 → 0 frames with a car going backwards
+- [x] Live sessions recorded (`sessions/<key>.jsonl`) and replayed after a restart: the lap log survives
+- [x] Tray and dashboard are one app (`main.App` owns one live feed; the dashboard is its window). One desktop shortcut, `F1 Live.bat` / `run_live.pyw` gone; Start with Windows adds `--tray`. Settings (delay, names size, replay speed) moved into `config.json`
+- [x] Goes live by itself from 10 min before each session to 30 min after (item 10's goal, by the schedule rather than by probing the feed). A replay can play while live keeps recording. Tray icon green dot + status tooltip
+- [x] Radio transcription model freed when the dashboard closes
+- [x] Pit loss: the race's own stops from the third, before MultiViewer's value (`scripts/validate_pit_blend.py`: 799 stops of 2025–26, loss 1.18 → 0.84 s off, rejoin 1.35 → 1.30 places). Singapore published 27.6 s, measured 24.2 s
+- [x] Telemetry card removed from the map
+- [x] My drivers (follow + alerts) and my team in Settings; all names on the map, followed drivers ringed; highlighted tower rows; sim opens on the first
+- [x] Battles tab / widget: on-track gap, gap net of stops still owed, pace edge, catch laps, tyres, gap trend, real rival with pin; pinned pairs (+ Battle, tower right-click)
+- [x] Alerts (races/sprints, live, after the delay): pit window, rival pitted, SC/VSC cheap stop, stewards/retirement, 2+ places; team double stack, teammates fighting/swapping, slow stop. Dashboard popup while open, else Windows notification
+- [x] ⏱ Sync delay (or S): delay from the lap counter change on TV
+- [x] Sim refit after each race in the background, offered with the backtest change (tray → Apply new sim fit), history in tray → Strategy sim accuracy. 2026 refitted with Singapore: 23 races
+- [x] Sim fit keeps traffic laps for a driver left with fewer than 3 free laps (found by the pit window alert on Bahrain 2026: HAM P9 → simulated P21). 2026 out of sample: position error 1.21 → 1.13, log score −1.77 → −1.70, lap error 0.689 → 0.675 s
+- [x] `PitStopSeries` not sent live even with F1 TV (checked during the Singapore race)
+- [x] Tests: alerts, battle math, stops owed, delay sync, pit loss order, traffic laps. 74 pass
+- [x] Renamed **Box Box** (was F1 Tracker): repo `soham2121/box-box` (was `f1-thing`), package `boxbox`, data folder `%APPDATA%\boxbox` (moved from `f1tracker` on the first start, when the old app isn't running), Start with Windows entry and desktop shortcut renamed the same way
+
 ## Group 4 — UX
-- [ ] 15. Settings dialog (validated, saved, applied without restart)
+- [~] 15. Settings dialog: one dialog for the app (tray or dashboard), applied at once; sim knobs still hand-edited JSON
 - [x] 16. Desktop layer survives Win+D (done early on request, 2026-10-06). Rainmeter's method: every 250 ms, if the foreground window is the desktop (shell window, or WorkerW/Progman hosting SHELLDLL_DefView) the widgets go topmost, otherwise back to the bottom. Qt's WindowStaysOnBottomHint had to go: Qt forced those windows back to the bottom. Verified with Show desktop on this PC (Windows 11 build 26200)
-- [x] Single tray instance (on request): named mutex `Local\f1tracker-tray-<user>`; a second launch notifies the first over QLocalSocket and exits
+- [x] Single tray instance (on request): named mutex `Local\boxbox-tray-<user>`; a second launch notifies the first over QLocalSocket and exits
 - [ ] 17. Logging with rotation
 - [ ] 15b. FastF1 auth isolated in one module, graceful failures
 

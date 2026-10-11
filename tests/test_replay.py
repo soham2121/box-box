@@ -2,7 +2,7 @@ import time
 
 import pytest
 
-from f1tracker import data, live
+from boxbox import data, live
 
 GREEN, LAP_S, LAPS = 100.0, 90.0, 10
 

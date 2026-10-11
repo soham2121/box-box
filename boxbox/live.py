@@ -150,10 +150,12 @@ class State:
         self.gps = {}          # racing number -> (x, y), only when Position.z flows (F1 TV / replay)
         self.gps_t = 0
         self.trail = {}        # racing number -> deque of (feed time, x, y): GPS samples, ahead of .gps while held back
+        self.gps_off = None    # feed time minus GPS sample clock, for the trail (add_trail)
         self.sc_moved = {}     # safety car number -> feed time it last moved
         self.clock_t = 0       # feed time the last ExtrapolatedClock message arrived
         self.delay = 0         # s to hold live data back, to match a video stream that runs behind live timing
         self.held = collections.deque()
+        self.lap_seen = collections.deque(maxlen=30)  # (arrival time, lap): the leader starting each lap, before the delay
         self.prog = {}         # racing number -> [lap fraction at snap, snap time, cap fraction]
         self.flags = {}        # racing number -> {'pit', 'sc'} seen during the current lap
         self.lastlap = {}
@@ -181,12 +183,24 @@ class State:
             elif m[0] in ('Position', 'Position.z'):  # unpacked once, here, so the trail runs ahead of the delay
                 m = ('Position', unz(m[1]) if m[0].endswith('.z') else m[1], m[2])
                 self.add_trail(m[1], m[2])
+            elif m[0] == 'LapCount' and isinstance(m[1], dict) and str(m[1].get('CurrentLap', '')).isdigit():
+                lap = int(m[1]['CurrentLap'])
+                if not self.lap_seen or lap > self.lap_seen[-1][1]:
+                    self.lap_seen.append((m[2], lap))
             self.held.append(m)
         now = self.now()
         while self.held and time.monotonic() < end:
             if self.lag() and self.held[0][2] > now:
                 return
             self.apply(*self.held.popleft())
+
+    def sync_delay(self, pressed, current=0):
+        """Delay (s) that puts a lap-counter change seen live at `pressed`, the moment the TV showed it: the change
+        nearest the current delay, or the latest one when none is set. None before any change."""
+        ds = [pressed - t for t, lap in self.lap_seen if t <= pressed]
+        if not ds:
+            return None
+        return round(min(ds, key=lambda d: abs(d - current)) if current else min(ds))
 
     def lag(self):
         """The delay applies to the live feed only (replays have their own clock)."""
@@ -195,7 +209,7 @@ class State:
     def reset(self):
         """Back to an empty session (a replay jumping backwards); keeps the queue, feed, track and pit-loss sources."""
         keep = {k: getattr(self, k) for k in ('q', 'held', 'delay', 'feed', 'track', 'pit_known', 'pit_weekend', 'pit_typical',
-                                              'trail')}  # trail: cleared by pump() when it queues the reset
+                                              'trail', 'gps_off', 'lap_seen')}  # trail: cleared by pump() when it queues the reset
         self.__init__()
         self.__dict__.update(keep)
 
@@ -216,6 +230,13 @@ class State:
         before it as far apart as their own timestamps."""
         samples = x.get('Position') or []
         end = clock(samples[-1]) if samples else None
+        if end is not None:  # t is when the message arrived: network jitter moved whole messages back and forth (cars
+            # rubber-banded at any delay). Go by the samples' own clock, offset by the quickest delivery seen so far.
+            if self.gps_off is None:
+                self.gps_off = t - end
+            late = (t - end - self.gps_off + 43200) % 86400 - 43200  # % : past midnight
+            self.gps_off += min(late, 0)
+            t -= max(late, 0)
         for s in samples:
             at = t - (end - clock(s)) % 86400 if end is not None and clock(s) is not None else t  # % : past midnight
             for n, e in s['Entries'].items():
@@ -767,19 +788,50 @@ class ReplayFeed(threading.Thread):
 class LiveFeed(threading.Thread):
     """F1 live timing over SignalR via FastF1's client. Reconnects forever (the server drops after ~2 h)."""
 
-    def __init__(self, state, auth=True):
+    def __init__(self, state, auth=True, record=False):
         super().__init__(daemon=True)
         self.state, self.auth, self.stop = state, auth, False
+        # record: one process at a time (the dashboard, else the tray). state None: only records (the tray)
+        self.record, self.key, self.out = record, None, None
         self.status = 'connecting…'
-        state.feed = self
+        if state:
+            state.feed = self
 
     def now(self):
         return time.time()
 
     def push(self, topic, x):
-        if topic == 'SessionInfo' and self.state.track is None and isinstance(x, dict) and 'Meeting' in x:
+        t = time.time()
+        if topic == 'SessionInfo' and isinstance(x, dict) and x.get('Key') and str(x['Key']) != self.key:
+            self.key = str(x['Key'])
+            if self.record:
+                self.restore()
+        if self.state and topic == 'SessionInfo' and self.state.track is None and isinstance(x, dict) and 'Meeting' in x:
             load_track(self.state, x, positions=True)
-        self.state.q.put((topic, x, time.time()))
+        if self.state:
+            self.state.q.put((topic, x, t))
+        if self.out and not topic.endswith('.z'):  # GPS and car data: only the latest matters, and they're most of it
+            self.out.write(json.dumps([t, topic, x]) + '\n')
+
+    def restore(self):
+        """Opened again during a session: what this session sent before (the lap log for the sim, gaps, pit stops)
+        goes in first, then the server's snapshot of now. Records the rest of it to the same file."""
+        folder = data.APP_DIR / 'sessions'
+        folder.mkdir(parents=True, exist_ok=True)
+        for f in folder.glob('*.jsonl'):  # a weekend's sessions are enough
+            if f.stat().st_mtime < time.time() - 4 * 86400:
+                f.unlink()
+        path = folder / f'{self.key}.jsonl'
+        if self.state and path.exists() and not self.state.d and self.state.q.empty():  # not when reconnecting into a running State
+            for line in path.open(encoding='utf-8'):
+                try:
+                    t, topic, x = json.loads(line)
+                except ValueError:
+                    continue  # last line cut off when the app was killed
+                self.state.q.put((topic, x, t))
+        if self.out:
+            self.out.close()
+        self.out = path.open('a', encoding='utf-8', buffering=1)
 
     def run(self):
         from fastf1.livetiming.client import SignalRClient
@@ -791,8 +843,8 @@ class LiveFeed(threading.Thread):
                 super()._on_message(msg)  # keeps FastF1's raw recording in live.txt
                 if feed.stop:
                     return
-                if isinstance(msg, CompletionMessage):
-                    for k, v in (msg.result or {}).items():
+                if isinstance(msg, CompletionMessage):  # the snapshot: SessionInfo first, it says what to restore
+                    for k, v in sorted((msg.result or {}).items(), key=lambda kv: kv[0] != 'SessionInfo'):
                         feed.push(k, v)
                 elif isinstance(msg, list) and len(msg) >= 2:
                     feed.push(msg[0], msg[1])
@@ -841,6 +893,8 @@ class LiveFeed(threading.Thread):
             except Exception as e:
                 self.status = f'disconnected: {e}'
             time.sleep(15)
+        if self.out:
+            self.out.close()
 
 
 # ---- F1 TV sign-in (FastF1's browser helper, without its console prompts) ------

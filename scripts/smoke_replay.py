@@ -12,7 +12,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 
 from PySide6.QtWidgets import QApplication  # noqa: E402
 
-from f1tracker import live, main  # noqa: E402
+from boxbox import live, main  # noqa: E402
 
 PATH = sys.argv[1] if len(sys.argv) > 1 else '2026/2026-10-04_Bahrain_Grand_Prix/2026-10-04_Race/'
 LAPS = [int(x) for x in (sys.argv[2] if len(sys.argv) > 2 else '11,25').split(',')]

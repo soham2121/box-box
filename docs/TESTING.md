@@ -13,7 +13,7 @@ python -m venv .venv            (already done if .venv exists)
 .venv\Scripts\pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-Start the app: `.venv\Scripts\python -m f1tracker.main`. A red **F1** icon appears in the tray (may be under the `^`
+Start the app: `.venv\Scripts\python -m boxbox.main`. A red **F1** icon appears in the tray (may be under the `^`
 overflow arrow). Everything is in its right-click menu.
 
 ---
@@ -26,7 +26,7 @@ overflow arrow). Everything is in its right-click menu.
 |---|---|
 | `.venv\Scripts\python -m pytest` | `23 passed, 2 deselected` |
 | `.venv\Scripts\python -m pytest -m integration` | `2 passed` (needs internet) |
-| `.venv\Scripts\python -m f1tracker.sim` | `lap_mae_s` ≈ 0.356, `backtest OK` |
+| `.venv\Scripts\python -m boxbox.sim` | `lap_mae_s` ≈ 0.356, `backtest OK` |
 | `.venv\Scripts\python scripts\smoke_replay.py` | ends with `smoke OK`; lap 11 shows `pit loss 22.7s (typical circuit…)`, lap 25 `(this session, n=4)` |
 
 ### B. Basic app check (≈ 3 min)
@@ -61,7 +61,7 @@ overflow arrow). Everything is in its right-click menu.
 Live projection only runs with a **live** session (replay projection is group 3, item 14).
 
 - Next live chance: **Singapore GP sprint weekend**.
-  - Sprint Qualifying, Fri 09 Oct 18:00 (your time per the next-race widget): Tray → Live tracker. Standings must
+  - Sprint Qualifying, Fri 09 Oct 18:00 (your time per the next-race widget): the app goes live by itself (tray tooltip `LIVE`). Standings must
     **not** show `LIVE PROJECTION` (old bug: it projected sprint points in sprint quali).
   - Sprint, Sat 10 Oct: standings show `DRIVERS · LIVE PROJECTION` with green `+8 … +1` deltas for the top 8;
     constructors show `CONSTRUCTORS · LIVE PROJECTION`.
@@ -71,7 +71,7 @@ Live projection only runs with a **live** session (replay projection is group 3,
 - Offline check of the same logic: `.venv\Scripts\python -m pytest tests/test_points.py -v`.
 
 ### E2. Start with Windows + positions after a restart (done early)
-1. Double-click `F1 Tracker.bat`. The tray icon appears, with no console window.
+1. Double-click `Box Box.bat`. The tray icon appears, with no console window.
 2. Drag a widget somewhere new and wait 2 s.
 3. Tray → tick **Start with Windows**.
 4. Restart the PC, without quitting the app first. After login the tray icon and the widgets come back, at the new position.
@@ -92,12 +92,12 @@ Live projection only runs with a **live** session (replay projection is group 3,
 | `.venv\Scripts\python scripts\smoke_dashboard.py` | `live on launch: LiveFeed …`, tower with INT/LEADER/LAST/BEST columns, a what-if result, `live threads alive: 0` |
 
 ### B. Between race weekends (now)
-1. Double-click `F1 Live.bat`. The window opens: map left, timing right, sim bottom right.
+1. Double-click **Box Box** on the desktop. The dashboard opens: map left, timing right, sim bottom right.
 2. The status line (top right) shows `live (no auth: estimated map) · <last session> … Ends`: F1's server sends the last session's final state.
 3. Replay → 2026 → Bahrain Grand Prix → Race, then Replay → Speed → 30x.
    - Laps 9–12: yellow map border, cars in the pit lane grey, tower shows PIT, sim says `under SC`.
    - Drag the splitters to resize the panels. Close and reopen: size and splitters are kept.
-4. Tray app still works alongside: tray → Open live dashboard opens a second dashboard window. Close it again.
+4. Tray → Open live dashboard brings the same window to the front (there is only one). Close it: the tray and widgets carry on.
 
 ### C. F1 TV sign-in
 1. Click **Sign in to F1 TV…**. Your browser opens the F1 login; the button says `Finish the sign-in in your browser…`.
@@ -109,12 +109,12 @@ Live projection only runs with a **live** session (replay projection is group 3,
 1. Open the dashboard a few minutes before FP1. When the session starts, the timing fills within seconds, and the map moves (estimated, or GPS if signed in).
 2. Sprint / race: the sim panel shows the pit loss source changing as stops happen (Singapore has circuit data: expect `27.6s (circuit data)`).
 3. Leave it running across a red flag or long gap: it should keep or regain the connection (it reconnects 15 s after a drop).
-4. After the session, send me `%APPDATA%\f1tracker\live.txt` (raw feed) so I can check which data arrived with F1 TV.
+4. After the session, send me `%APPDATA%\boxbox\live.txt` (raw feed) so I can check which data arrived with F1 TV.
 
 ---
 
 ## Desktop icons + split opacity (added 2026-10-06)
-1. Your desktop has **F1 Live** and **F1 Tracker** with the red F1 icon. Double-click each: the dashboard window opens, or the tray icon appears. No console window.
+1. Your desktop has **Box Box** with the red F1 icon. Double-click it: the tray icon appears and the dashboard opens. No console window.
 2. Tray → **Text opacity** → 55%: the text fades, the dark background stays.
 3. Tray → **Background opacity** → 0%: the background disappears and only text shows. You can still drag the widget by grabbing anywhere inside its area.
 4. Restart the app: both settings are kept.
@@ -125,31 +125,31 @@ Live projection only runs with a **live** session (replay projection is group 3,
 ## Win+D + single instance (added 2026-10-06)
 First quit the tray app you already have running (tray → Quit): it still runs the old code.
 
-1. Start **F1 Tracker** from the desktop. Widgets appear behind your open apps.
+1. Start **Box Box** from the desktop. Widgets appear behind your open apps.
 2. Press **Win+D**. All widgets stay visible on the desktop.
 3. Press **Win+D** again (or click any app): your apps come back over the widgets.
 4. Click the desktop wallpaper: the widgets come forward again. Drag one: it moves normally.
 5. Tray → **Always on top**: the widgets stay above everything. Untick it: back to the desktop behaviour.
-6. With the tray app running, double-click **F1 Tracker** again. No second set of widgets appears; a tray notification says `Already running`.
-7. Tray → Quit, then double-click **F1 Tracker**: it starts normally.
+6. With the app running, double-click **Box Box** again. No second set of widgets appears; the dashboard opens (or comes to the front).
+7. Tray → Quit, then double-click **Box Box**: it starts normally.
 
 ---
 
 ## F1 TV sign-in + one dashboard (fixed 2026-10-06)
 First quit the old copies: tray → Quit, and close the F1 live window.
 
-1. Double-click **F1 Live**. Click **Sign in to F1 TV…**.
+1. Open the dashboard (desktop **Box Box**). Click **Sign in to F1 TV…**.
 2. If the page says "Get the FastF1 Companion Extension": install it, then click **Sign in to F1 TV…** again. It reuses the same waiting login, so you don't need to close anything.
 3. The extension sends you to account.formula1.com. Log in; it then shows "Login Successful!". Click **Connect FastF1**.
    - Expected: "Authentication successful!" in the browser, and `F1 TV: signed in ✓` in the dashboard.
    - Not expected any more: "Could not connect to the local FastF1 application".
-4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\f1tracker\live.log` and a screenshot.
-5. Double-click **F1 Live** again: no second window opens; the open one comes to the front.
+4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\boxbox\live.log` and a screenshot.
+5. Double-click **Box Box** again: no second window opens; the open one comes to the front.
 
 ---
 
 ## Replay jumping (added 2026-10-06)
-1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race. A second toolbar row appears.
+1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race. A second toolbar row appears.
 2. Drag the slider to about 3/4: within a second the map, timing and sim jump to about lap 41; the label shows `L41/55 · …`.
 3. Click **◀ Lap** three times quickly: you land 3 laps back. **Lap ▶** goes forward one.
 4. **Pause**: everything freezes, the map keeps showing GPS positions. **Play** resumes at the previous speed.
@@ -158,18 +158,18 @@ First quit the old copies: tray → Quit, and close the F1 live window.
 7. Tray app: Replay a past session → … → tray menu shows **Jump to lap…**; enter 30.
 
 ## Dashboard settings, SC, wind (added 2026-10-06)
-Restart F1 Live first (tray → Quit doesn't close it; close the window and reopen).
-1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race. Drag the slider to about lap 11 (SC period). A yellow `SC` dot leads the field. The status line says `SC Deployed` with a space.
+Restart the app first (tray → Quit, then **Box Box**).
+1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race. Drag the slider to about lap 11 (SC period). A yellow `SC` dot leads the field. The status line says `SC Deployed` with a space.
 2. Jump to lap 20 (green flag). The SC dot is gone.
 2b. Drag the slider near the end (after lap 50): BOT, ALB and RUS have no dots on the map (they stopped) and are struck through in the timing table.
 3. Top right of the map: a compass with `N`, a blue arrow and `wind … m/s from …`.
 4. **Settings…** → driver names 150 %: names grow straight away.
 5. In the list, click **None**, then tick two drivers. Only those two have names; all dots stay. **All** brings every name back.
-6. Close and reopen F1 Live: the size and the picked drivers are kept.
+6. Close and reopen the dashboard: its size and the picked drivers are kept.
 7. **Live (Singapore):** watch F1 TV in the browser. Set **Delay live data** until an overtake shows on the map when you see it on the video (try 30–60 s first). The status line shows `delayed N s`. Note the number that works for you.
 
 ## Session layouts (added 2026-10-06)
-Close and reopen F1 Live first.
+Close and reopen the dashboard first.
 1. Replay → 2026 → Bahrain Grand Prix → Qualifying. Drag to about 3/5 (Q2).
    - The right side shows sector timing, with Tyres and Race control below.
    - The header says `Q2 · mm:ss left` and counts down.
@@ -184,12 +184,12 @@ Close and reopen F1 Live first.
 7. **Live (Singapore):** FP1 uses the practice layout, Sprint Qualifying shows `SQ1/SQ2/SQ3`, and the Sprint and Race switch to the race layout on their own.
 
 ## Replay speed setting + sim row (added 2026-10-06)
-1. F1 Live → **Settings…** → **Replays start at** 30x. Start a replay: it plays at 30x and the speed box says 30x. Pause → Play resumes at 30x.
-2. Reopen F1 Live: the setting is kept.
+1. Dashboard → **Settings…** → **Replays start at** 30x. Start a replay: it plays at 30x and the speed box says 30x. Pause → Play resumes at 30x.
+2. Restart the app: the setting is kept.
 3. Race replay, Strategy sim tab: the row reads `driver ▾ · pit on lap · [lap] · compound ▾`, with no big gap after the label.
 
 ## Older seasons in the Replay menu (added 2026-10-06)
-1. F1 Live → **Replay**: years 2026 down to 2018 are listed. Hover **2024**: it says `loading…` for a second or two, then lists 25 weekends from Pre-Season Testing to Abu Dhabi. Each opens to the side with its sessions.
+1. Dashboard → **Replay**: years 2026 down to 2018 are listed. Hover **2024**: it says `loading…` for a second or two, then lists 25 weekends from Pre-Season Testing to Abu Dhabi. Each opens to the side with its sessions.
 2. 2018 → Australian Grand Prix → Race: it plays. The map says `ESTIMATED` (no GPS for that race). Tyres: `US` purple, `SS` red, `S` yellow (2018 colours).
    2018 → Abu Dhabi Grand Prix → Race, Tyre stints tab: `HS` pink, `US` purple, `SS` red bars.
 3. 2023 → Qatar Grand Prix: it lists Practice 1, Qualifying, Sprint Shootout, Sprint and Race; the Race plays.
@@ -199,10 +199,10 @@ Close and reopen F1 Live first.
 
 ## Group 2: strategy sim (added 2026-10-06)
 1. `.venv\Scripts\python -m pytest` passes (`tests/test_sim.py`: lapped gaps, two-compound rule GP vs sprint, wrong tyres in rain, pass odds, planned stop then rain).
-2. `.venv\Scripts\python -m f1tracker.calibrate 2026` (about a minute) ends with a `calibrated` line better than `default` on pos_err and logp. Without a year it fits all three eras (about an hour the first time).
+2. `.venv\Scripts\python -m boxbox.calibrate 2026` (about a minute) ends with a `calibrated` line better than `default` on pos_err and logp. Without a year it fits all three eras (about an hour the first time).
 2b. Strategy sim on a 2019 replay (2019 → Italian Grand Prix → Race, lap 25): the mass line says about 796 kg (743 kg minimum + 53 kg of the 100 kg start fuel left), not a 2026 figure.
-3. `.venv\Scripts\python -m f1tracker.sim` still prints `backtest OK` (Azerbaijan).
-4. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, jump to lap 25. Strategy sim tab: under the pit row, pick **rain (inters) from lap** 30, then **Best window**: the list is INTERMEDIATE stops around laps 29–31. Back to **track stays as now**: dry compounds again.
+3. `.venv\Scripts\python -m boxbox.sim` still prints `backtest OK` (Azerbaijan).
+4. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, jump to lap 25. Strategy sim tab: under the pit row, pick **rain (inters) from lap** 30, then **Best window**: the list is INTERMEDIATE stops around laps 29–31. Back to **track stays as now**: dry compounds again.
 5. Same replay, a lapped car in the driver box: "Pit now → rejoin" shows a position (it used to fail once anyone was lapped).
 6. A sprint replay (2026 → Miami Grand Prix → Sprint): What if for a car that has only used one compound no longer forces a stop.
 
@@ -213,14 +213,35 @@ Close and reopen F1 Live first.
 4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `tray.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
 
 ## SC / VSC / red flag in the sim (added 2026-10-06)
-1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, lap 25. Strategy sim: third row **safety car on lap** 30, **Best window**: the result says `with safety car on lap 30`; the window ends at the SC (stops on laps 31–33, after the queue has formed, rank lower). Scroll the result if it's long.
+1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, lap 25. Strategy sim: third row **safety car on lap** 30, **Best window**: the result says `with safety car on lap 30`; the window ends at the SC (stops on laps 31–33, after the queue has formed, rank lower). Scroll the result if it's long.
 2. Same, **What if** (pit on lap 28): the result also starts with `with safety car on lap 30`.
 3. Jump into the lap-9 SC of that race (laps 9–12), What if: the result says `SC out now (~N laps left)`; after race control's "SAFETY CAR IN THIS LAP" it says ~1 lap.
 4. **red flag on lap** N: cars that owe a stop no longer have to pit later (free tyre change).
 5. `.venv\Scripts\python scripts\validate_pit_neutral.py` (about half an hour) prints, per era, the worn rule vs the fitted odds vs + shared factor on seasons the fit never saw; the shared factor's "spread ratio" is near 1.
 
 ## Dashboard look, monitors, live countdown (added 2026-10-09)
-1. F1 Live → Replay → 2026 → Bahrain Grand Prix → Race, lap 9. Toolbar chips: the feed, session, lap, and the track status chip in yellow while the SC is out. The fastest lap in the timing tower is purple; the sim's What if shows a green bar of the likeliest finishes.
+1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, lap 9. Toolbar chips: the feed, session, lap, and the track status chip in yellow while the SC is out. The fastest lap in the timing tower is purple; the sim's What if shows a green bar of the likeliest finishes.
 2. With a second monitor: drag a tray widget onto it, quit, unplug the monitor (or move it in Windows display settings), start again. The widget sits on the nearest screen's edge instead of off screen. Same while the app runs: about half a second after the change.
 3. During a session (Singapore FP1, Fri 9 Oct): the Next race widget shows `FP1 LIVE` in green instead of the countdown, then the countdown to the next session an hour after the start.
 4. GitHub: open the repo page. The README banner animates (cars lap Marina Bay, five lights come on, then go out).
+
+## One app, battles, alerts, Box Box (added 2026-10-11)
+Quit the old app first (tray → Quit), then start **Box Box** from the desktop. The first start moves `%APPDATA%\f1tracker` to `%APPDATA%\boxbox` and renames the Start with Windows entry.
+
+### A. Automated
+`.venv\Scripts\python -m pytest` (74 pass) and `.venv\Scripts\python scripts\smoke_dashboard.py`: goes live by hand, replays Bahrain to lap 25 while live keeps recording, what-if, back to live, closes the dashboard (tray and live carry on).
+
+### B. Between race weekends
+1. Double-click **Box Box**: tray icon and dashboard. Double-click it again: the dashboard comes to the front, no second tray icon. Close the dashboard: the tray icon stays; hover it for `next: … in …`.
+2. Tray → **Settings…**: tick **Follow** for two drivers and **Alerts** for one; pick **My team**. Replay Bahrain 2026 race (dashboard → Replay): followed drivers have a white ring and white name on the map, every other car keeps its name; their timing rows are highlighted; the strategy sim opens on the first.
+3. **Battles** tab (top right, races only): a card per followed driver with the car ahead and behind: on track gap, net of stops, pace, tyres, gap chart. **+ Battle** pins a pair; right-click the timing tower → **Add battle** does too; **✕** removes it.
+4. Strategy sim tab: pit loss reads `this session, N stops` once 3 stops are done (no longer the published value).
+5. The map has no telemetry card.
+6. Tray → **Strategy sim accuracy** lists refits (empty until the first race after this build reaches the archive).
+
+### C. Next race weekend (live)
+1. Leave the app running (or Start with Windows). From 10 min before FP1 the tray icon gets a green dot and the tooltip says `LIVE · …` without clicking anything; widgets show the session.
+2. Open the dashboard during the race: **⏱ Sync delay** (or S) the moment the F1 TV lap counter changes → a popup says the new delay; overtakes on the map now match the stream.
+3. Alerts: with the dashboard open they pop up top right; minimise it and they come as Windows notifications. Expect pit stops of cars around your alert driver, SC/VSC, investigations.
+4. Close the dashboard mid-race and reopen it: laps logged so far are all there (sim panel `N laps logged`).
+5. 30 min after the flag the green dot goes. A few hours later the tray says a sim refit is ready: tray → **Apply new sim fit**.

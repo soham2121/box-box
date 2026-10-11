@@ -1,6 +1,6 @@
 import json
 
-from f1tracker import main
+from boxbox import main
 
 
 def test_old_single_opacity_becomes_text_and_background(tmp_path, monkeypatch):

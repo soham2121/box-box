@@ -49,6 +49,20 @@ def text(url):
     return None
 
 
+def release():
+    """The dashboard closed: stop transcribing and free the model (~500 MB). Clips still waiting are asked again
+    next time they're shown."""
+    global _worker
+    with _lock:
+        if _worker is None:
+            return
+        while not _jobs.empty():
+            _jobs.get_nowait()
+        _jobs.put(None)
+        _asked.clear()
+        _worker = None
+
+
 @functools.cache
 def available():
     try:
@@ -67,6 +81,10 @@ def _run():
         return
     while True:
         url = _jobs.get()
+        if url is None:  # release(): the model goes with this thread
+            return
+        if url in _done:  # asked again after a release
+            continue
         try:
             r = requests.get(url, headers=data.UA, timeout=20)
             r.raise_for_status()

@@ -1,6 +1,7 @@
+import json
 import time
 
-from f1tracker import live
+from boxbox import live
 
 
 def test_delay_holds_live_data_until_it_is_old_enough():
@@ -75,7 +76,7 @@ def test_quali_part_and_drop_zone():
 
 def test_tyre_colours_follow_the_season():
     """Pirelli 2018: seven dry compounds, soft yellow / medium white / hard ice blue. From 2019: soft red, medium yellow, hard white."""
-    from f1tracker.widgets import tyre_style
+    from boxbox.widgets import tyre_style
     st = live.State()
     st.apply('SessionInfo', {'StartDate': '2018-03-25T16:10:00'}, 0)
     assert [tyre_style(c, st)[0] for c in ('HYPERSOFT', 'ULTRASOFT', 'SUPERSOFT', 'SUPERHARD')] == ['HS', 'US', 'SS', 'SH']
@@ -122,7 +123,7 @@ def test_cars_glide_between_fixes_only_with_enough_delay():
     now = time.time()
     pos = lambda x, ts: {'Position': [{'Timestamp': ts, 'Entries': {'1': {'X': x, 'Y': 1}}}]}
     st.q.put(('Position', pos(0, '2026-10-11T12:00:00.0Z'), now - 11))
-    st.q.put(('Position', pos(100, '2026-10-11T12:00:01.0Z'), now - 9))  # still held at delay 10
+    st.q.put(('Position', pos(100, '2026-10-11T12:00:02.0Z'), now - 9))  # still held at delay 10
     st.delay = 10
     st.pump()
     x = st.positions()[0][0][1]
@@ -138,6 +139,16 @@ def test_samples_in_one_message_spread_by_their_timestamps():
                                {'Timestamp': '2026-10-11T12:00:00.5Z', 'Entries': {'1': {'X': 10, 'Y': 1}}}]}, 100)
     assert st.glide('1', 99.75) == (5, 1)  # the last sample is at the message time, the first 0.5 s before it
     assert st.glide('1', 200) == (10, 1)  # nothing newer: holds the last fix
+
+
+def test_late_message_keeps_its_place_by_gps_clock():
+    """A message that arrives 1 s late still sits 1 s after the one before it, not 2 s: cars don't rubber-band."""
+    st = live.State()
+    pos = lambda x, ts: {'Position': [{'Timestamp': ts, 'Entries': {'1': {'X': x, 'Y': 1}}}]}
+    st.add_trail(pos(0, '2026-10-11T12:00:00.0Z'), 100)
+    st.add_trail(pos(10, '2026-10-11T12:00:01.0Z'), 102)  # late
+    st.add_trail(pos(20, '2026-10-11T12:00:02.0Z'), 102)  # on time again
+    assert [s[0] for s in st.trail['1']] == [100, 101, 102]
 
 
 def test_yellow_sectors_follow_race_control():
@@ -162,7 +173,7 @@ def test_marshal_sectors_snap_in_lap_order_and_the_last_wraps():
 
 def test_same_tyres_through_the_pits_stay_one_stint():
     """Red flag: F1 opens a new stint with TyresNotChanged '1' for cars that keep their tyres."""
-    from f1tracker.widgets import stints
+    from boxbox.widgets import stints
     st = live.State()
     st.apply('TimingAppData', {'Lines': {'1': {'Stints': [
         {'Compound': 'INTERMEDIATE', 'New': 'true', 'TyresNotChanged': '0', 'TotalLaps': 2, 'StartLaps': 0},
@@ -172,7 +183,7 @@ def test_same_tyres_through_the_pits_stay_one_stint():
 
 
 def test_radio_transcript_cached_and_queued_once(monkeypatch):
-    from f1tracker import radio
+    from boxbox import radio
     monkeypatch.setattr(radio, '_done', {'u1': 'box box'})
     monkeypatch.setattr(radio, '_asked', set())
     monkeypatch.setattr(radio, '_worker', object())  # pretend it runs: nothing transcribes in a test
@@ -181,3 +192,41 @@ def test_radio_transcript_cached_and_queued_once(monkeypatch):
     assert radio.text('u1') == 'box box'
     assert radio.text('u2') is None and radio.text('u2') is None
     assert jobs.qsize() == 1  # asked twice, queued once
+
+
+def test_live_session_restored_after_reopening(tmp_path, monkeypatch):
+    """The dashboard closed and opened mid-session: what it recorded goes in before the server's snapshot."""
+    monkeypatch.setattr(live.data, 'APP_DIR', tmp_path)
+    feed = live.LiveFeed(live.State(), record=True)
+    feed.push('SessionInfo', {'Key': 11388})
+    feed.push('LapCount', {'CurrentLap': 5})
+    feed.push('Position.z', 'not recorded')
+    feed.out.close()
+    st = live.State()
+    feed = live.LiveFeed(st, record=True)
+    feed.push('SessionInfo', {'Key': 11388})
+    got = [m[:2] for m in list(st.q.queue)]
+    assert got == [('SessionInfo', {'Key': 11388}), ('LapCount', {'CurrentLap': 5}), ('SessionInfo', {'Key': 11388})]
+    feed.out.close()
+
+
+def test_recorder_without_state_only_writes(tmp_path, monkeypatch):
+    """The tray records while the dashboard is closed: nothing queued, nothing restored, every message to the file."""
+    monkeypatch.setattr(live.data, 'APP_DIR', tmp_path)
+    feed = live.LiveFeed(None, record=True)
+    feed.push('SessionInfo', {'Key': 7})
+    feed.push('LapCount', {'CurrentLap': 2})
+    feed.out.close()
+    assert [json.loads(l)[1] for l in (tmp_path / 'sessions' / '7.jsonl').open()] == ['SessionInfo', 'LapCount']
+
+
+def test_delay_sync_to_the_lap_counter_on_tv():
+    """Pressed as the TV's lap counter changes: the delay that lines the live lap change up with it."""
+    st = live.State()
+    for t, lap in ((1000.0, 30), (1000.2, 30), (1095.0, 31), (1190.5, 32)):
+        st.q.put(('LapCount', {'CurrentLap': lap, 'TotalLaps': 62}, t))
+    st.pump()
+    assert [l for _, l in st.lap_seen] == [30, 31, 32]  # repeats count once
+    assert st.sync_delay(1139.4) == 44  # no delay yet: the latest change, lap 31 shown 44.4 s later
+    assert st.sync_delay(1236.0, current=44) == 46  # lap 32, nearest the delay already set
+    assert live.State().sync_delay(1000.0) is None

@@ -86,6 +86,15 @@
     "2021 Saudi Arabian Grand Prix",
     "2021 Abu Dhabi Grand Prix"
    ],
+   "_scores": {
+    "mae": 0.7678,
+    "pos_err": 1.5186,
+    "rho": 0.8749,
+    "logp": -1.9569,
+    "rps": 0.069,
+    "cover80": 0.7985,
+    "rejoin": 2.0078
+   },
    "sc_per_race": 0.783,
    "sc_laps": 4.0,
    "vsc_per_race": 0.518,
@@ -94,8 +103,8 @@
    "vsc_lap_factor": 1.277,
    "red_per_race": 0.12,
    "pass": [
-    0.6744,
-    1.0331,
+    0.6788,
+    1.0262,
     -4.9152
    ],
    "prior": {
@@ -108,7 +117,7 @@
      0.0438
     ],
     "HARD": [
-     0.112,
+     0.097,
      0.0361
     ],
     "INTERMEDIATE": [
@@ -128,9 +137,9 @@
     "WET": 99
    },
    "pass_restart": [
-    0.3559,
-    0.5775,
-    -5.6099
+    0.3571,
+    0.5742,
+    -5.6122
    ],
    "pit_neutral": [
     -4.1355,
@@ -145,7 +154,7 @@
     "sc": 2.011,
     "vsc": 1.712
    },
-   "pace_sd": 0.316
+   "pace_sd": 0.312
   },
   "2022-2025": {
    "_fitted_on": [
@@ -263,6 +272,15 @@
     "2025 Qatar Grand Prix",
     "2025 Abu Dhabi Grand Prix"
    ],
+   "_scores": {
+    "mae": 0.7633,
+    "pos_err": 1.4791,
+    "rho": 0.8926,
+    "logp": -1.9513,
+    "rps": 0.0647,
+    "cover80": 0.7977,
+    "rejoin": 1.1947
+   },
    "sc_per_race": 0.699,
    "sc_laps": 4.0,
    "vsc_per_race": 0.478,
@@ -271,18 +289,18 @@
    "vsc_lap_factor": 1.329,
    "red_per_race": 0.115,
    "pass": [
-    0.1265,
-    1.1992,
-    -4.7852
+    0.1196,
+    1.244,
+    -4.8085
    ],
    "prior": {
     "SOFT": [
-     -0.5,
+     -0.493,
      0.0959
     ],
     "MEDIUM": [
      0.0,
-     0.0652
+     0.063
     ],
     "HARD": [
      0.186,
@@ -305,9 +323,9 @@
     "WET": 99
    },
    "pass_restart": [
-    -0.0327,
-    0.7659,
-    -6.0573
+    -0.032,
+    0.8026,
+    -6.0678
    ],
    "pit_neutral": [
     -6.6393,
@@ -322,7 +340,7 @@
     "sc": 1.857,
     "vsc": 2.322
    },
-   "pace_sd": 0.245
+   "pace_sd": 0.218
   },
   "2026-": {
    "_fitted_on": [
@@ -347,28 +365,38 @@
     "2026 Spanish Grand Prix",
     "2026 Azerbaijan Grand Prix",
     "2026 Bahrain Grand Prix",
-    "2026 Singapore Grand Prix sprint"
+    "2026 Singapore Grand Prix sprint",
+    "2026 Singapore Grand Prix"
    ],
-   "sc_per_race": 0.636,
+   "_scores": {
+    "mae": 0.675,
+    "pos_err": 1.1337,
+    "rho": 0.9253,
+    "logp": -1.6975,
+    "rps": 0.0502,
+    "cover80": 0.8075,
+    "rejoin": 0.7197
+   },
+   "sc_per_race": 0.609,
    "sc_laps": 4.0,
-   "vsc_per_race": 0.909,
+   "vsc_per_race": 0.957,
    "vsc_laps": 2.0,
    "sc_lap_factor": 1.411,
    "vsc_lap_factor": 1.301,
-   "red_per_race": 0.136,
+   "red_per_race": 0.13,
    "pass": [
-    0.73,
-    0.6027,
-    -5.126
+    0.7121,
+    0.6726,
+    -5.1537
    ],
    "prior": {
     "SOFT": [
-     -0.033,
-     0.067
+     -0.257,
+     0.0757
     ],
     "MEDIUM": [
      0.0,
-     0.0674
+     0.0681
     ],
     "HARD": [
      0.159,
@@ -391,24 +419,24 @@
     "WET": 99
    },
    "pass_restart": [
-    -0.2695,
-    1.18,
-    -4.0073
+    -0.2502,
+    1.1895,
+    -4.0249
    ],
    "pit_neutral": [
-    -3.7105,
-    1.0283,
-    0.5504,
-    1.6077,
-    2.46,
-    0.2074,
-    -2.1906
+    -3.4227,
+    1.0971,
+    -1.5993,
+    1.6452,
+    2.5848,
+    0.2547,
+    -1.7897
    ],
    "pit_neutral_sd": {
-    "sc": 2.23,
-    "vsc": 1.437
+    "sc": 2.178,
+    "vsc": 1.812
    },
-   "pace_sd": 0.208
+   "pace_sd": 0.134
   }
  }
 }
