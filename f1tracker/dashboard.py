@@ -1,6 +1,5 @@
 """Live dashboard: one window with a big track map, the timing tower and the strategy sim, no standings.
 Connects to the live feed on launch. Run: python -m f1tracker.dashboard (or double-click "F1 Live.bat")."""
-import getpass
 import json
 import sys
 import time
@@ -12,11 +11,10 @@ from PySide6.QtWidgets import (QApplication, QComboBox, QDialog, QFormLayout, QH
                                QSplitter, QStackedWidget, QTabWidget, QToolBar, QToolButton, QWidget)
 
 from . import data, live, sim
-from .main import already_running, console_to_file, icon, listen, load_config
+from .main import DASH_INSTANCE as INSTANCE, already_running, console_to_file, icon, listen, load_config
 from .widgets import (COND_BOLD, STATUS_TINT, RaceControl, SectorTower, SimPanel, StintPanel, TimingTower, TrackMap,
                       TyrePanel, bg, replay_years)
 
-INSTANCE = f'f1tracker-live-{getpass.getuser()}'  # one dashboard per Windows user, so one live connection
 SETTINGS = data.APP_DIR / 'dashboard.json'  # own file: the tray app rewrites config.json whenever it saves
 SPEEDS = (1, 5, 10, 30, 60)
 ACCENT = '#E10600'
@@ -247,7 +245,7 @@ class Dashboard(QMainWindow):
         if not (keep and old):
             self.state = live.State()
         self.state.delay = self.cfg['delay']
-        live.LiveFeed(self.state, auth=self.cfg.get('live_auth', True)).start()
+        live.LiveFeed(self.state, auth=self.cfg.get('live_auth', True), record=True).start()
 
     def start_replay(self, path):
         self.stop_feed()

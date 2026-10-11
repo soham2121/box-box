@@ -1,3 +1,4 @@
+import json
 import time
 
 from f1tracker import live
@@ -122,7 +123,7 @@ def test_cars_glide_between_fixes_only_with_enough_delay():
     now = time.time()
     pos = lambda x, ts: {'Position': [{'Timestamp': ts, 'Entries': {'1': {'X': x, 'Y': 1}}}]}
     st.q.put(('Position', pos(0, '2026-10-11T12:00:00.0Z'), now - 11))
-    st.q.put(('Position', pos(100, '2026-10-11T12:00:01.0Z'), now - 9))  # still held at delay 10
+    st.q.put(('Position', pos(100, '2026-10-11T12:00:02.0Z'), now - 9))  # still held at delay 10
     st.delay = 10
     st.pump()
     x = st.positions()[0][0][1]
@@ -138,6 +139,16 @@ def test_samples_in_one_message_spread_by_their_timestamps():
                                {'Timestamp': '2026-10-11T12:00:00.5Z', 'Entries': {'1': {'X': 10, 'Y': 1}}}]}, 100)
     assert st.glide('1', 99.75) == (5, 1)  # the last sample is at the message time, the first 0.5 s before it
     assert st.glide('1', 200) == (10, 1)  # nothing newer: holds the last fix
+
+
+def test_late_message_keeps_its_place_by_gps_clock():
+    """A message that arrives 1 s late still sits 1 s after the one before it, not 2 s: cars don't rubber-band."""
+    st = live.State()
+    pos = lambda x, ts: {'Position': [{'Timestamp': ts, 'Entries': {'1': {'X': x, 'Y': 1}}}]}
+    st.add_trail(pos(0, '2026-10-11T12:00:00.0Z'), 100)
+    st.add_trail(pos(10, '2026-10-11T12:00:01.0Z'), 102)  # late
+    st.add_trail(pos(20, '2026-10-11T12:00:02.0Z'), 102)  # on time again
+    assert [s[0] for s in st.trail['1']] == [100, 101, 102]
 
 
 def test_yellow_sectors_follow_race_control():
@@ -181,3 +192,29 @@ def test_radio_transcript_cached_and_queued_once(monkeypatch):
     assert radio.text('u1') == 'box box'
     assert radio.text('u2') is None and radio.text('u2') is None
     assert jobs.qsize() == 1  # asked twice, queued once
+
+
+def test_live_session_restored_after_reopening(tmp_path, monkeypatch):
+    """The dashboard closed and opened mid-session: what it recorded goes in before the server's snapshot."""
+    monkeypatch.setattr(live.data, 'APP_DIR', tmp_path)
+    feed = live.LiveFeed(live.State(), record=True)
+    feed.push('SessionInfo', {'Key': 11388})
+    feed.push('LapCount', {'CurrentLap': 5})
+    feed.push('Position.z', 'not recorded')
+    feed.out.close()
+    st = live.State()
+    feed = live.LiveFeed(st, record=True)
+    feed.push('SessionInfo', {'Key': 11388})
+    got = [m[:2] for m in list(st.q.queue)]
+    assert got == [('SessionInfo', {'Key': 11388}), ('LapCount', {'CurrentLap': 5}), ('SessionInfo', {'Key': 11388})]
+    feed.out.close()
+
+
+def test_recorder_without_state_only_writes(tmp_path, monkeypatch):
+    """The tray records while the dashboard is closed: nothing queued, nothing restored, every message to the file."""
+    monkeypatch.setattr(live.data, 'APP_DIR', tmp_path)
+    feed = live.LiveFeed(None, record=True)
+    feed.push('SessionInfo', {'Key': 7})
+    feed.push('LapCount', {'CurrentLap': 2})
+    feed.out.close()
+    assert [json.loads(l)[1] for l in (tmp_path / 'sessions' / '7.jsonl').open()] == ['SessionInfo', 'LapCount']

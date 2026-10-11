@@ -6,6 +6,7 @@ import json
 import sys
 import time
 import winreg
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from PySide6.QtCore import QRectF, Qt, QTimer
@@ -18,6 +19,7 @@ from .widgets import KINDS, bg, replay_years
 
 CONFIG = data.APP_DIR / 'config.json'
 INSTANCE = f'f1tracker-tray-{getpass.getuser()}'  # one tray app per Windows user
+DASH_INSTANCE = f'f1tracker-live-{getpass.getuser()}'  # one dashboard per Windows user, so one live connection
 RUN_KEY, RUN_VALUE = r'Software\Microsoft\Windows\CurrentVersion\Run', 'F1 tracker'
 NAMES = {'drivers': 'Driver standings', 'teams': 'Constructor standings', 'next': 'Next race',
          'map': 'Track map', 'tower': 'Timing tower', 'sim': 'Strategy sim'}
@@ -74,6 +76,7 @@ class App:
     def __init__(self, qapp):
         self.qapp, self.cfg = qapp, load_config()
         self.static, self.state, self.windows = {}, None, {}
+        self.recorder = None  # LiveFeed recording the session while the dashboard is closed
         self.tray = QSystemTrayIcon(icon(), qapp)
         self.tray.setToolTip('F1 tracker')
         self.menu = QMenu()
@@ -170,6 +173,20 @@ class App:
                 self.fetch()
         for w in self.windows.values():
             w.tick()
+        self.keep_recording()
+
+    def keep_recording(self):
+        """From 10 min before a session to 30 min after it, while the dashboard is closed, record the session so the
+        dashboard picks it up when opened (LiveFeed.restore). The dashboard records itself while open."""
+        race, now = self.static.get('next'), datetime.now(timezone.utc)
+        on = isinstance(race, dict) and any(data.live_session(race, now + timedelta(minutes=m)) for m in (10, -30))
+        want = on and not mutex_exists(DASH_INSTANCE)
+        if want and not self.recorder:
+            self.recorder = live.LiveFeed(None, auth=self.cfg['live_auth'], record=True)
+            self.recorder.start()
+        elif not want and self.recorder:
+            self.recorder.stop = True
+            self.recorder = None
 
     def start(self, feed_cls, *args, **kw):
         if self.state and self.state.feed:
@@ -353,7 +370,9 @@ user32.FindWindowExW.argtypes = [ctypes.c_void_p, ctypes.c_void_p, ctypes.c_wcha
 user32.GetClassNameW.argtypes = [ctypes.c_void_p, ctypes.c_wchar_p, ctypes.c_int]
 user32.SetWindowPos.argtypes = [ctypes.c_void_p, ctypes.c_void_p] + [ctypes.c_int] * 4 + [ctypes.c_uint]
 user32.AllowSetForegroundWindow.argtypes = [ctypes.c_uint]
-kernel32.CreateMutexW.restype = ctypes.c_void_p
+kernel32.CreateMutexW.restype = kernel32.OpenMutexW.restype = ctypes.c_void_p
+kernel32.OpenMutexW.argtypes = [ctypes.c_uint, ctypes.c_bool, ctypes.c_wchar_p]
+kernel32.CloseHandle.argtypes = [ctypes.c_void_p]
 _mutexes = []  # held until the process exits
 HWND_TOPMOST, HWND_NOTOPMOST, HWND_BOTTOM = -1, -2, 1
 SWP_KEEP = 0x0001 | 0x0002 | 0x0010  # NOSIZE | NOMOVE | NOACTIVATE
@@ -382,6 +401,14 @@ def already_running(name):
     s.connectToServer(name)
     s.waitForConnected(1000)
     return True
+
+
+def mutex_exists(name):
+    """True while some process holds the named mutex `name` (see already_running)."""
+    h = kernel32.OpenMutexW(0x00100000, False, f'Local\\{name}')  # SYNCHRONIZE
+    if h:
+        kernel32.CloseHandle(h)
+    return bool(h)
 
 
 def listen(name, on_launch):
