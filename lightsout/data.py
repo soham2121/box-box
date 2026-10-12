@@ -14,14 +14,15 @@ _gai = socket.getaddrinfo
 socket.getaddrinfo = lambda *a, **k: sorted(_gai(*a, **k), key=lambda r: r[0] != socket.AF_INET)
 
 _ROOT = Path(os.getenv('APPDATA', Path.home()))
-APP_DIR = _ROOT / 'boxbox'
-if not APP_DIR.exists() and (_ROOT / 'f1tracker').exists():  # settings, recordings, caches of the app's old name
-    try:
-        (_ROOT / 'f1tracker').rename(APP_DIR)
-    except OSError:  # files still open (the old app is running): keep using the old folder, moved next start
-        APP_DIR = _ROOT / 'f1tracker'
+APP_DIR = _ROOT / 'lightsout'
+for _old in ('boxbox', 'f1tracker'):  # settings, recordings, caches of the app's old names
+    if not APP_DIR.exists() and (_ROOT / _old).exists():
+        try:
+            (_ROOT / _old).rename(APP_DIR)
+        except OSError:  # files still open (the old app is running): keep using the old folder, moved next start
+            APP_DIR = _ROOT / _old
 CACHE = APP_DIR / 'cache'
-UA = {'User-Agent': 'boxbox/0.1'}  # MultiViewer rejects the default python-requests agent
+UA = {'User-Agent': 'lightsout/0.1'}  # MultiViewer rejects the default python-requests agent
 JOLPICA = 'https://api.jolpi.ca/ergast/f1'
 ARCHIVE = 'https://livetiming.formula1.com/static/'
 MIRROR = 'https://livetiming-mirror.fastf1.dev/static/'  # FastF1's mirror of the archive (fastf1._api.base_url_mirror)

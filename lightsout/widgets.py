@@ -46,7 +46,7 @@ def bg(work, done):
         try:
             r = work()
         except Exception as e:  # shown in the widget instead of killing the thread silently, and logged in full
-            logging.getLogger('boxbox').exception('background job failed')
+            logging.getLogger('lightsout').exception('background job failed')
             r = e
         BUS.call.emit(lambda: done(r))
     threading.Thread(target=run, daemon=True).start()

@@ -2,8 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from boxbox import data, live
-from boxbox.widgets import projection, session_kind
+from lightsout import data, live
+from lightsout.widgets import projection, session_kind
 
 DRIVERS = [  # Jolpica standings rows (points before this session)
     {'pos': 1, 'code': 'ANT', 'team': 'Mercedes', 'colour': '00D7B6', 'points': 100.0, 'wins': 3},
@@ -97,7 +97,7 @@ def test_jolpica_round_counted_live():
 
 def replay_app(year, name='Race', best=None):
     """A replay of a `year` session, standings before it already loaded (widgets.BASES)."""
-    from boxbox import widgets
+    from lightsout import widgets
     st = live.State()
     live.ReplayFeed(st, 'x/')  # registers itself as st.feed; never started
     path = f'{year}/{year}-07-18_British_Grand_Prix/{year}-07-18_Race/'

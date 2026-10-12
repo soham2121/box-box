@@ -14,7 +14,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 import fastf1
 import numpy as np
 fastf1.set_log_level('ERROR')
-from boxbox import calibrate as c, sim
+from lightsout import calibrate as c, sim
 
 SPLITS = [('2018-2021', [2018, 2019, 2020], [2021]), ('2022-2025', [2022, 2023, 2024], [2025]), ('2026-', [2026], None)]
 T, H = np.polynomial.hermite.hermgauss(24)

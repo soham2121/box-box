@@ -1,8 +1,8 @@
 """Strategy-sim calibration over archived races, one fit per regulation era (sim.ERAS), with a leave-one-race-out
 backtest. Each era is a different car, so no era borrows another's numbers.
 
-Run: .venv\\Scripts\\python -m boxbox.calibrate [years...] [--write]
-  years pick the eras to fit (default: every era, all its seasons). --write stores them in boxbox/calibration.json
+Run: .venv\\Scripts\\python -m lightsout.calibrate [years...] [--write]
+  years pick the eras to fit (default: every era, all its seasons). --write stores them in lightsout/calibration.json
   under "eras"; sim.season_model() applies the session's era (config.json "model" overrides still win).
   --json PATH writes the fitted eras, with their backtest means, to PATH instead (the app's refit after each race).
 

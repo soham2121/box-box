@@ -5,7 +5,7 @@ import time
 import pytest
 import requests
 
-from boxbox import data
+from lightsout import data
 
 URL = 'https://api.jolpi.ca/ergast/f1/current.json'
 

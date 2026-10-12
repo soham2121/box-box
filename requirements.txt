@@ -1,4 +1,4 @@
-# What Box Box imports itself. Lower bounds are the versions it was tested with (2026-10-11).
+# What Lights Out imports itself. Lower bounds are the versions it was tested with (2026-10-11).
 # FastF1 is pinned: the app uses its private F1 TV sign-in and live client code (live.py), which can change in any
 # release. Before raising it, re-test F1 TV sign-in and a live session.
 fastf1==3.8.3

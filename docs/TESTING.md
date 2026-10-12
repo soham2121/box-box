@@ -13,7 +13,7 @@ python -m venv .venv            (already done if .venv exists)
 .venv\Scripts\pip install -r requirements.txt -r requirements-dev.txt
 ```
 
-Start the app: `.venv\Scripts\python -m boxbox.main`. A red **F1** icon appears in the tray (may be under the `^`
+Start the app: `.venv\Scripts\python -m lightsout.main`. A red **F1** icon appears in the tray (may be under the `^`
 overflow arrow). Everything is in its right-click menu.
 
 ---
@@ -26,7 +26,7 @@ overflow arrow). Everything is in its right-click menu.
 |---|---|
 | `.venv\Scripts\python -m pytest` | `23 passed, 2 deselected` |
 | `.venv\Scripts\python -m pytest -m integration` | `2 passed` (needs internet) |
-| `.venv\Scripts\python -m boxbox.sim` | `lap_mae_s` ≈ 0.356, `backtest OK` |
+| `.venv\Scripts\python -m lightsout.sim` | `lap_mae_s` ≈ 0.356, `backtest OK` |
 | `.venv\Scripts\python scripts\smoke_replay.py` | ends with `smoke OK`; lap 11 shows `pit loss 22.7s (typical circuit…)`, lap 25 `(this session, n=4)` |
 
 ### B. Basic app check (≈ 3 min)
@@ -71,7 +71,7 @@ Live projection only runs with a **live** session (replay projection is group 3,
 - Offline check of the same logic: `.venv\Scripts\python -m pytest tests/test_points.py -v`.
 
 ### E2. Start with Windows + positions after a restart (done early)
-1. Double-click `Box Box.bat`. The tray icon appears, with no console window.
+1. Double-click `Lights Out.bat`. The tray icon appears, with no console window.
 2. Drag a widget somewhere new and wait 2 s.
 3. Tray → tick **Start with Windows**.
 4. Restart the PC, without quitting the app first. After login the tray icon and the widgets come back, at the new position.
@@ -92,7 +92,7 @@ Live projection only runs with a **live** session (replay projection is group 3,
 | `.venv\Scripts\python scripts\smoke_dashboard.py` | `live on launch: LiveFeed …`, tower with INT/LEADER/LAST/BEST columns, a what-if result, `live threads alive: 0` |
 
 ### B. Between race weekends (now)
-1. Double-click **Box Box** on the desktop. The dashboard opens: map left, timing right, sim bottom right.
+1. Double-click **Lights Out** on the desktop. The dashboard opens: map left, timing right, sim bottom right.
 2. The status line (top right) shows `live (no auth: estimated map) · <last session> … Ends`: F1's server sends the last session's final state.
 3. Replay → 2026 → Bahrain Grand Prix → Race, then Replay → Speed → 30x.
    - Laps 9–12: yellow map border, cars in the pit lane grey, tower shows PIT, sim says `under SC`.
@@ -109,12 +109,12 @@ Live projection only runs with a **live** session (replay projection is group 3,
 1. Open the dashboard a few minutes before FP1. When the session starts, the timing fills within seconds, and the map moves (estimated, or GPS if signed in).
 2. Sprint / race: the sim panel shows the pit loss source changing as stops happen (Singapore has circuit data: expect `27.6s (circuit data)`).
 3. Leave it running across a red flag or long gap: it should keep or regain the connection (it reconnects 15 s after a drop).
-4. After the session, send me `%APPDATA%\boxbox\live.txt` (raw feed) so I can check which data arrived with F1 TV.
+4. After the session, send me `%APPDATA%\lightsout\live.txt` (raw feed) so I can check which data arrived with F1 TV.
 
 ---
 
 ## Desktop icons + split opacity (added 2026-10-06)
-1. Your desktop has **Box Box** with the red F1 icon. Double-click it: the tray icon appears and the dashboard opens. No console window.
+1. Your desktop has **Lights Out** with the red F1 icon. Double-click it: the tray icon appears and the dashboard opens. No console window.
 2. Tray → **Text opacity** → 55%: the text fades, the dark background stays.
 3. Tray → **Background opacity** → 0%: the background disappears and only text shows. You can still drag the widget by grabbing anywhere inside its area.
 4. Restart the app: both settings are kept.
@@ -125,26 +125,26 @@ Live projection only runs with a **live** session (replay projection is group 3,
 ## Win+D + single instance (added 2026-10-06)
 First quit the tray app you already have running (tray → Quit): it still runs the old code.
 
-1. Start **Box Box** from the desktop. Widgets appear behind your open apps.
+1. Start **Lights Out** from the desktop. Widgets appear behind your open apps.
 2. Press **Win+D**. All widgets stay visible on the desktop.
 3. Press **Win+D** again (or click any app): your apps come back over the widgets.
 4. Click the desktop wallpaper: the widgets come forward again. Drag one: it moves normally.
 5. Tray → **Always on top**: the widgets stay above everything. Untick it: back to the desktop behaviour.
-6. With the app running, double-click **Box Box** again. No second set of widgets appears; the dashboard opens (or comes to the front).
-7. Tray → Quit, then double-click **Box Box**: it starts normally.
+6. With the app running, double-click **Lights Out** again. No second set of widgets appears; the dashboard opens (or comes to the front).
+7. Tray → Quit, then double-click **Lights Out**: it starts normally.
 
 ---
 
 ## F1 TV sign-in + one dashboard (fixed 2026-10-06)
 First quit the old copies: tray → Quit, and close the F1 live window.
 
-1. Open the dashboard (desktop **Box Box**). Click **Sign in to F1 TV…**.
+1. Open the dashboard (desktop **Lights Out**). Click **Sign in to F1 TV…**.
 2. If the page says "Get the FastF1 Companion Extension": install it, then click **Sign in to F1 TV…** again. It reuses the same waiting login, so you don't need to close anything.
 3. The extension sends you to account.formula1.com. Log in; it then shows "Login Successful!". Click **Connect FastF1**.
    - Expected: "Authentication successful!" in the browser, and `F1 TV: signed in ✓` in the dashboard.
    - Not expected any more: "Could not connect to the local FastF1 application".
-4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\boxbox\logs\boxbox.log` and a screenshot.
-5. Double-click **Box Box** again: no second window opens; the open one comes to the front.
+4. If it fails, the dashboard button shows why (timeout, no F1 TV subscription, token didn't verify). Send me `%APPDATA%\lightsout\logs\lightsout.log` and a screenshot.
+5. Double-click **Lights Out** again: no second window opens; the open one comes to the front.
 
 ---
 
@@ -158,7 +158,7 @@ First quit the old copies: tray → Quit, and close the F1 live window.
 7. Tray app: Replay a past session → … → tray menu shows **Jump to lap…**; enter 30.
 
 ## Dashboard settings, SC, wind (added 2026-10-06)
-Restart the app first (tray → Quit, then **Box Box**).
+Restart the app first (tray → Quit, then **Lights Out**).
 1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race. Drag the slider to about lap 11 (SC period). A yellow `SC` dot leads the field. The status line says `SC Deployed` with a space.
 2. Jump to lap 20 (green flag). The SC dot is gone.
 2b. Drag the slider near the end (after lap 50): BOT, ALB and RUS have no dots on the map (they stopped) and are struck through in the timing table.
@@ -199,9 +199,9 @@ Close and reopen the dashboard first.
 
 ## Group 2: strategy sim (added 2026-10-06)
 1. `.venv\Scripts\python -m pytest` passes (`tests/test_sim.py`: lapped gaps, two-compound rule GP vs sprint, wrong tyres in rain, pass odds, planned stop then rain).
-2. `.venv\Scripts\python -m boxbox.calibrate 2026` (about a minute) ends with a `calibrated` line better than `default` on pos_err and logp. Without a year it fits all three eras (about an hour the first time).
+2. `.venv\Scripts\python -m lightsout.calibrate 2026` (about a minute) ends with a `calibrated` line better than `default` on pos_err and logp. Without a year it fits all three eras (about an hour the first time).
 2b. Strategy sim on a 2019 replay (2019 → Italian Grand Prix → Race, lap 25): the mass line says about 796 kg (743 kg minimum + 53 kg of the 100 kg start fuel left), not a 2026 figure.
-3. `.venv\Scripts\python -m boxbox.sim` still prints `backtest OK` (Azerbaijan).
+3. `.venv\Scripts\python -m lightsout.sim` still prints `backtest OK` (Azerbaijan).
 4. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, jump to lap 25. Strategy sim tab: under the pit row, pick **rain (inters) from lap** 30, then **Best window**: the list is INTERMEDIATE stops around laps 29–31. Back to **track stays as now**: dry compounds again.
 5. Same replay, a lapped car in the driver box: "Pit now → rejoin" shows a position (it used to fail once anyone was lapped).
 6. A sprint replay (2026 → Miami Grand Prix → Sprint): What if for a car that has only used one compound no longer forces a stop.
@@ -210,7 +210,7 @@ Close and reopen the dashboard first.
 1. Tray → Replay a past session → 2018 → Abu Dhabi Grand Prix → Race, jump to the last lap. Driver standings header: `PROJECTION AS OF 2018 REPLAY`, HAM 408 (+25), VET 320; constructors Mercedes 655.
 2. Tray replay 2021 → British Grand Prix → Sprint Qualifying near the end: VER +3, HAM +2, BOT +1 (2021 sprint points).
 3. Tray replay 2026 → Bahrain Grand Prix → Qualifying, slider to about 3/5 (Q2): the timing tower header shows `Q2 · mm:ss left`, P11–16 red, six cars greyed `out`.
-4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `%APPDATA%\boxbox\logs\boxbox.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
+4. Tray → Replay a past session → …without GPS → 2026 → Azerbaijan Grand Prix → Race. Within a few seconds `%APPDATA%\lightsout\logs\lightsout.log` says `estimated positions calibrated on …Qualifying`. The estimated dots now sit on the cars' real spots (Baku median error 8 m, was 126 m behind).
 
 ## SC / VSC / red flag in the sim (added 2026-10-06)
 1. Dashboard → Replay → 2026 → Bahrain Grand Prix → Race, lap 25. Strategy sim: third row **safety car on lap** 30, **Best window**: the result says `with safety car on lap 30`; the window ends at the SC (stops on laps 31–33, after the queue has formed, rank lower). Scroll the result if it's long.
@@ -225,14 +225,14 @@ Close and reopen the dashboard first.
 3. During a session (Singapore FP1, Fri 9 Oct): the Next race widget shows `FP1 LIVE` in green instead of the countdown, then the countdown to the next session an hour after the start.
 4. GitHub: open the repo page. The README banner animates (cars lap Marina Bay, five lights come on, then go out).
 
-## One app, battles, alerts, Box Box (added 2026-10-11)
-Quit the old app first (tray → Quit), then start **Box Box** from the desktop. The first start moves `%APPDATA%\f1tracker` to `%APPDATA%\boxbox` and renames the Start with Windows entry.
+## One app, battles, alerts, Lights Out (added 2026-10-11)
+Quit the old app first (tray → Quit), then start **Lights Out** from the desktop. The first start moves `%APPDATA%\f1tracker` to `%APPDATA%\lightsout` and renames the Start with Windows entry.
 
 ### A. Automated
 `.venv\Scripts\python -m pytest` (85 pass), `-m integration` (3 pass, downloads data), `.venv\Scripts\python scripts\smoke_replay.py`, and `.venv\Scripts\python scripts\smoke_dashboard.py`: goes live by hand, replays Bahrain to lap 25 while live keeps recording, what-if, back to live, closes the dashboard (tray and live carry on).
 
 ### B. Between race weekends
-1. Double-click **Box Box**: tray icon and dashboard. Double-click it again: the dashboard comes to the front, no second tray icon. Close the dashboard: the tray icon stays; hover it for `next: … in …`.
+1. Double-click **Lights Out**: tray icon and dashboard. Double-click it again: the dashboard comes to the front, no second tray icon. Close the dashboard: the tray icon stays; hover it for `next: … in …`.
 2. Tray → **Settings…**: tick **Follow** for two drivers and **Alerts** for one; pick **My team**. Replay Bahrain 2026 race (dashboard → Replay): followed drivers have a white ring and white name on the map, every other car keeps its name; their timing rows are highlighted; the strategy sim opens on the first.
 3. **Battles** tab (top right, races only): a card per followed driver with the car ahead and behind: on track gap, net of stops, pace, tyres, gap chart. **+ Battle** pins a pair; right-click the timing tower → **Add battle** does too; **✕** removes it.
 4. Strategy sim tab: pit loss reads `this session, N stops` once 3 stops are done (no longer the published value).
@@ -240,7 +240,7 @@ Quit the old app first (tray → Quit), then start **Box Box** from the desktop.
 6. Tray → **Strategy sim accuracy** lists refits (empty until the first race after this build reaches the archive).
 7. Settings → **Strategy sim**: each knob shows `fitted` and its fitted value in the label. Set soft tyre life to 18, run **Best window**: softs stop earlier. Turn it back down to `fitted`, or press **all back to fitted**.
 8. Settings → **Go live by itself around every session** unticked: the tray tooltip says `(going live by itself is off)`; tick it again.
-9. `%APPDATA%\boxbox\logs\boxbox.log` exists and has a `started` line with the time; tray menu → **Sign in to F1 TV…** shows the sign-in's state and expiry date.
+9. `%APPDATA%\lightsout\logs\lightsout.log` exists and has a `started` line with the time; tray menu → **Sign in to F1 TV…** shows the sign-in's state and expiry date.
 
 ### C. Next race weekend (live)
 0. Before the weekend: tray menu → **Sign in to F1 TV…** shows `signed in to F1 TV until …` after a date past the race. If not, sign in again (the tray also warns when it would run out first).
@@ -249,3 +249,15 @@ Quit the old app first (tray → Quit), then start **Box Box** from the desktop.
 3. Alerts: with the dashboard open they pop up top right; minimise it and they come as Windows notifications. Expect pit stops of cars around your alert driver, SC/VSC, investigations.
 4. Close the dashboard mid-race and reopen it: laps logged so far are all there (sim panel `N laps logged`).
 5. 30 min after the flag the green dot goes. A few hours later the tray says a sim refit is ready: tray → **Apply new sim fit**.
+
+## Setup and live dashboard only (Lights Out, 2026-10-12)
+
+By hand, once, on a Windows user account with no Python (a new local account works):
+
+1. Download the ZIP from GitHub, extract, double-click `Setup.bat`. Expect: Python 3.12 installs without an admin prompt, packages install, the 1 / 2 question.
+2. Pick **1**. Expect: the Lights Out shortcut on the desktop, the app starts with the dashboard and no desktop widgets; the tray menu shows **Desktop widgets** unticked and no widget items.
+3. Tray → **Desktop widgets**: driver standings, constructor standings and next race appear. Untick: they close.
+4. Run `Setup.bat` again with the app running: it asks to quit the app first. Quit, press Enter, pick **2**: widgets come up with the app.
+5. On this PC (old **Box Box** install): after the first start, `%APPDATA%\lightsout` holds the old settings, `%APPDATA%\boxbox` is gone, the desktop shortcut and Start with Windows entry are named Lights Out.
+
+Automated: `test_live_dashboard_only_shows_no_desktop_widgets`, `test_old_app_folder_moves_to_lightsout` (tests/test_config.py).

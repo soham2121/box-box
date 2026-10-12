@@ -1,4 +1,4 @@
-from boxbox import alerts
+from lightsout import alerts
 
 LOSS = {'normal': 22.0, 'sc': 12.0, 'vsc': 15.0}
 
