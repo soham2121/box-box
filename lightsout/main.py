@@ -1,5 +1,5 @@
-"""Box Box tray app: config, background fetches, feeds, the widget windows and the live dashboard.
-Run: python -m boxbox.main"""
+"""Lights Out tray app: config, background fetches, feeds, the widget windows and the live dashboard.
+Run: python -m lightsout.main"""
 import copy
 import ctypes
 import getpass
@@ -24,11 +24,11 @@ from .alerts import ALERTS
 from .widgets import KINDS, bg, replay_years
 
 CONFIG = data.APP_DIR / 'config.json'
-INSTANCE = f'boxbox-tray-{getpass.getuser()}'  # one app per Windows user, so one live connection
+INSTANCE = f'lightsout-tray-{getpass.getuser()}'  # one app per Windows user, so one live connection
 DASH_SETTINGS = data.APP_DIR / 'dashboard.json'  # the dashboard window's layout (it once held its own settings too)
 REFIT = data.APP_DIR / 'refit.json'  # sim refits after each race: {'seen': [race labels offered], 'history': [...]}
-RUN_KEY, RUN_VALUE = r'Software\Microsoft\Windows\CurrentVersion\Run', 'Box Box'
-OLD_RUN_VALUE = 'F1 tracker'  # the app's name until 2026-10-11
+RUN_KEY, RUN_VALUE = r'Software\Microsoft\Windows\CurrentVersion\Run', 'Lights Out'
+OLD_RUN_VALUES = ('Box Box', 'F1 tracker')  # the app's names until 2026-10-12 and 2026-10-11
 NAMES = {'drivers': 'Driver standings', 'teams': 'Constructor standings', 'next': 'Next race',
          'map': 'Track map', 'tower': 'Timing tower', 'sim': 'Strategy sim', 'battles': 'Battles'}
 DEFAULTS = {
@@ -41,6 +41,7 @@ DEFAULTS = {
     'battles': [],     # pinned battle cards [['HAM', 'LEC']]
     'alerts': {k: True for k in ALERTS},  # alert types on/off
     'auto_live': True,  # go live by itself around every session
+    'desktop_widgets': True,  # False: the live dashboard only (Setup asks; tray: Desktop widgets)
 }
 
 
@@ -72,7 +73,7 @@ def load_config():
 
 
 def icon_pixmap(size=64, live_dot=False):
-    """The red F1 badge; also saved as boxbox/f1.ico for the desktop shortcut (scripts/create_shortcuts.ps1).
+    """The red F1 badge; also saved as lightsout/f1.ico for the desktop shortcut (scripts/create_shortcuts.ps1).
     live_dot: a green dot in the corner (tray, while live)."""
     k = size / 64
     pm = QPixmap(size, size)
@@ -113,15 +114,13 @@ class App:
         self.alerts = alerts.Watch(self)
         self.refit = self.new_fit = None  # (process, races added, result file) while a refit runs; its result to apply
         self.tray = QSystemTrayIcon(icon(), qapp)
-        self.tray.setToolTip('Box Box')
+        self.tray.setToolTip('Lights Out')
         self.menu = QMenu()
         self.menu.aboutToShow.connect(self.build_menu)
         self.tray.setContextMenu(self.menu)
         self.tray.show()
         self.save_timer = QTimer(singleShot=True, interval=1000, timeout=self.save)  # widgets moved/resized
-        for k in KINDS:
-            if self.cfg['widgets'][k]['on']:
-                self.show(k)
+        self.show_widgets()
         self.fetch()
         self.refresh_timer = QTimer(timeout=self.fetch, interval=self.cfg['refresh_min'] * 60000)
         self.refresh_timer.start()
@@ -238,7 +237,7 @@ class App:
             out.unlink(missing_ok=True)
             exe = Path(sys.executable).with_name('pythonw.exe')
             log = open(data.APP_DIR / 'refit.log', 'w', encoding='utf-8')
-            proc = subprocess.Popen([str(exe if exe.exists() else sys.executable), '-m', 'boxbox.calibrate', str(year),
+            proc = subprocess.Popen([str(exe if exe.exists() else sys.executable), '-m', 'lightsout.calibrate', str(year),
                                      '--json', str(out)], cwd=Path(__file__).resolve().parents[1], stdout=log, stderr=log,
                                     creationflags=0x4000 | 0x08000000)  # BELOW_NORMAL_PRIORITY_CLASS | CREATE_NO_WINDOW
             self.refit = (proc, new, out, year)
@@ -336,7 +335,7 @@ class App:
     def got_streaming(self, available):
         """F1 started streaming (Offline -> Available) while not live: a session the schedule doesn't have."""
         if available is True and not self.streaming and self.cfg['auto_live'] and not self.live and not self.live_paused:
-            logging.getLogger('boxbox').info('F1 is streaming a session: going live')
+            logging.getLogger('lightsout').info('F1 is streaming a session: going live')
             self.go_live()
         self.streaming = available is True
 
@@ -397,7 +396,7 @@ class App:
                 + ('' if self.cfg['auto_live'] else ' (going live by itself is off)'))
 
     def show_status(self):
-        tip, dot = 'Box Box\n' + self.status(), bool(self.live)
+        tip, dot = 'Lights Out\n' + self.status(), bool(self.live)
         if tip != self.tray.toolTip():
             self.tray.setToolTip(tip)
         if dot != getattr(self, 'dot', None):
@@ -412,6 +411,13 @@ class App:
         self.dash.bring_to_front()
 
     # ---- windows --------------------------------------------------------------------------------------------------
+    def show_widgets(self):
+        """The desktop widgets switched on, unless this is the live dashboard only (desktop_widgets off)."""
+        if self.cfg['desktop_widgets']:
+            for k in KINDS:
+                if self.cfg['widgets'][k]['on']:
+                    self.show(k)
+
     def show(self, k):
         self.cfg['widgets'][k]['on'] = True
         if k not in self.windows:
@@ -450,6 +456,12 @@ class App:
         if key in ('text_opacity', 'bg_opacity'):
             for w in self.windows.values():
                 w.apply_opacity()
+        if key == 'desktop_widgets':  # off closes them but keeps which were on, for switching back
+            self.show_widgets()
+            while not value and self.windows:
+                w = self.windows.popitem()[1]
+                w.close()
+                w.deleteLater()
         if key == 'refresh_min':
             self.refresh_timer.setInterval(value * 60000)
         if key == 'delay' and self.live:
@@ -530,24 +542,27 @@ class App:
                 'Stop replay' if self.state is not self.live else 'Stop live until this session is over', self.stop_feed)
         m.addSeparator()
 
-        for k, name in NAMES.items():
-            act(m, name, lambda c, k=k: self.toggle(k, c), k in self.windows)
-        nm = m.addMenu('Rows shown')
-        for k in ('drivers', 'teams', 'tower'):
-            sub = nm.addMenu(NAMES[k])
-            for n in (3, 5, 10, 15, 22):
-                act(sub, f'Top {n}', lambda _=0, k=k, n=n: self.set_n(k, n), self.cfg['widgets'][k]['n'] == n)
-        for key, title, values in (('text_opacity', 'Text opacity', (1.0, 0.85, 0.7, 0.55, 0.4)),
-                                   ('bg_opacity', 'Background opacity', (1.0, 0.85, 0.7, 0.5, 0.3, 0.15, 0.0))):
-            op = m.addMenu(title)
-            for o in values:
-                act(op, f'{o:.0%}', lambda _=0, k=key, o=o: self.set(k, o), abs(self.cfg[key] - o) < 1e-3)
-        rf = m.addMenu('Refresh standings')
-        for mins in (5, 15, 30, 60):
-            act(rf, f'every {mins} min', lambda _=0, x=mins: self.set('refresh_min', x), self.cfg['refresh_min'] == mins)
-        act(rf, 'now', self.fetch)
-        act(m, 'Lock positions', lambda c: self.set('locked', c), self.cfg['locked'])
-        act(m, 'Always on top (off = desktop layer)', lambda c: self.set('on_top', c), self.cfg['on_top'])
+        act(m, 'Desktop widgets', lambda c: self.set('desktop_widgets', c), self.cfg['desktop_widgets'])
+        if self.cfg['desktop_widgets']:
+            for k, name in NAMES.items():
+                act(m, name, lambda c, k=k: self.toggle(k, c), k in self.windows)
+            nm = m.addMenu('Rows shown')
+            for k in ('drivers', 'teams', 'tower'):
+                sub = nm.addMenu(NAMES[k])
+                for n in (3, 5, 10, 15, 22):
+                    act(sub, f'Top {n}', lambda _=0, k=k, n=n: self.set_n(k, n), self.cfg['widgets'][k]['n'] == n)
+            for key, title, values in (('text_opacity', 'Text opacity', (1.0, 0.85, 0.7, 0.55, 0.4)),
+                                       ('bg_opacity', 'Background opacity', (1.0, 0.85, 0.7, 0.5, 0.3, 0.15, 0.0))):
+                op = m.addMenu(title)
+                for o in values:
+                    act(op, f'{o:.0%}', lambda _=0, k=key, o=o: self.set(k, o), abs(self.cfg[key] - o) < 1e-3)
+            rf = m.addMenu('Refresh standings')
+            for mins in (5, 15, 30, 60):
+                act(rf, f'every {mins} min', lambda _=0, x=mins: self.set('refresh_min', x), self.cfg['refresh_min'] == mins)
+            act(rf, 'now', self.fetch)
+            act(m, 'Lock positions', lambda c: self.set('locked', c), self.cfg['locked'])
+            act(m, 'Always on top (off = desktop layer)', lambda c: self.set('on_top', c), self.cfg['on_top'])
+        m.addSeparator()
         act(m, 'Start with Windows', set_startup, startup_command() == startup_registered())
         act(m, 'More sim knobs (config.json; the main ones are in Settings)', self.open_config)
         if self.new_fit:
@@ -570,6 +585,8 @@ class App:
 
     def tray_replay(self, path, gps=True):
         self.start_replay(path, 10.0, gps)
+        if not self.cfg['desktop_widgets']:
+            return self.open_dashboard()
         for k in ('map', 'tower'):
             self.show(k)
 
@@ -692,7 +709,7 @@ def listen(name, on_launch):
     return server
 
 
-LOG = data.APP_DIR / 'logs' / 'boxbox.log'
+LOG = data.APP_DIR / 'logs' / 'lightsout.log'
 TOKEN = re.compile(r'eyJ[\w-]+\.[\w-]+\.[\w-]*')  # a JWT (F1 TV sign-in): never written to the log
 
 
@@ -725,7 +742,7 @@ class Lines:
 
 
 def start_log():
-    """logs/boxbox.log in the app folder, 1 MB x 5 files: the last runs stay readable (a live weekend's problems are
+    """logs/lightsout.log in the app folder, 1 MB x 5 files: the last runs stay readable (a live weekend's problems are
     still there after a restart), without filling the disk."""
     LOG.parent.mkdir(parents=True, exist_ok=True)
     h = RotatingFileHandler(LOG, maxBytes=1_000_000, backupCount=5, encoding='utf-8')
@@ -747,16 +764,18 @@ def start_log():
 
 
 def main():
-    """Tray, desktop widgets and the live feed; opens the dashboard too unless started with --tray (Windows login)."""
+    """Tray, desktop widgets (unless desktop_widgets is off) and the live feed; opens the dashboard too unless started
+    with --tray (Windows login)."""
     qapp = QApplication(sys.argv)
     tray_only = '--tray' in sys.argv
     if already_running(INSTANCE, b'tray' if tray_only else b'dash'):
         return
     start_log()  # after the check: a second launch exits without touching the running app's log
-    logging.getLogger('boxbox').info('started' + (' (--tray)' if tray_only else ''))
-    if startup_registered(OLD_RUN_VALUE) is not None:  # registered under the old name: same entry, new name
-        set_startup(False, OLD_RUN_VALUE)
-        set_startup(True)
+    logging.getLogger('lightsout').info('started' + (' (--tray)' if tray_only else ''))
+    for old in OLD_RUN_VALUES:
+        if startup_registered(old) is not None:  # registered under an old name: same entry, new name
+            set_startup(False, old)
+            set_startup(True)
     if startup_registered() not in (None, startup_command()):  # registered by an older version (no --tray)
         set_startup(True)
     qapp.setQuitOnLastWindowClosed(False)

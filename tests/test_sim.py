@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from conftest import make_race
-from boxbox import calibrate, sim
+from lightsout import calibrate, sim
 
 
 def model(total=10, base=None, **knobs):

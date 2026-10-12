@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="Box Box: cars lapping Marina Bay under five start lights" width="100%">
+  <img src="docs/banner.svg" alt="Lights Out: cars lapping Marina Bay under five start lights" width="100%">
 </p>
 
 <p align="center">
@@ -22,34 +22,31 @@
   <a href="#tests">Tests</a>
 </p>
 
-**Box Box** is a Formula 1 companion for Windows: desktop widgets (standings, next race countdown, track map, timing tower), a live dashboard that goes live by itself for every session, a strategy simulator for pit stop what-ifs, battle cards and race alerts for the drivers you follow.
+**Lights Out** is a Formula 1 companion for Windows: desktop widgets (standings, next race countdown, track map, timing tower), a live dashboard that goes live by itself for every session, a strategy simulator for pit stop what-ifs, battle cards and race alerts for the drivers you follow.
 
 > [!TIP]
 > No race on? **Replay** any session from 2018 on through the same widgets and dashboard, at up to 60x.
 
 ## Setup
 
-Requires Python 3.11+ on Windows.
+Windows 10 or 11. You don't need Python: setup installs it if it's missing.
 
-```
-git clone https://github.com/soham2121/box-box.git
-cd box-box
-python -m venv .venv
-.venv\Scripts\pip install -r requirements.txt
-.venv\Scripts\python -m boxbox.main
-```
+1. Download the project: on GitHub, **Code → Download ZIP**, then extract it (to Documents, say). Or `git clone https://github.com/soham2121/lights-out.git`.
+2. Double-click **`Setup.bat`** in the extracted folder. If Windows says "Windows protected your PC", click **More info → Run anyway**.
+3. Setup finds Python 3.11–3.13, or installs Python 3.12 for your Windows user only (no admin needed), installs the packages (a few minutes the first time), then asks:
+   - **[1] Live dashboard only**: the live map, timing, strategy sim, battles, alerts and replays, in one window.
+   - **[2] Live dashboard + desktop widgets**: the same, plus standings, next race, map and timing as widgets on the desktop.
+4. It puts a **Lights Out** shortcut on the desktop and starts the app. Sign in to F1 TV from the dashboard (or tray → **Sign in to F1 TV**) for the live map and timing. Each person signs in with their own F1 TV account.
 
-After setup, create the **Box Box** desktop shortcut with the F1 icon (it starts the app and opens the live dashboard; double-clicked while the app runs, it just opens the dashboard):
+Changed your mind? Tray → **Desktop widgets** switches the widgets on or off at any time. To update, download the new version and run `Setup.bat` again: your settings are kept (quit the app first; setup reminds you).
 
-```
-powershell -ExecutionPolicy Bypass -File scripts\create_shortcuts.ps1
-```
+Moved the folder? Run `Setup.bat` again, or just `powershell -ExecutionPolicy Bypass -File scripts\create_shortcuts.ps1` for the shortcut. Without the shortcut: double-click `Lights Out.bat`, or run `.venv\Scripts\pythonw.exe run.pyw`. Developers: `.venv\Scripts\python -m lightsout.main` runs it with a console.
 
-(Run it again if you move the project folder; it also removes the shortcuts of the app's old name, **F1 Live** and **F1 Tracker**.) Without shortcuts: double-click `Box Box.bat`, or run `.venv\Scripts\pythonw.exe run.pyw`.
+The app used to be called **Box Box** (and before that F1 Tracker): its settings folder, Start with Windows entry and desktop shortcut move to the new name by themselves.
 
-One app: a tray icon (red **F1**, with a green dot while live), the desktop widgets, one live connection and the live dashboard window. Right-click the icon for everything else; hover it for the status (`LIVE · Race · L35/62 · recording`, or `next: FP1 in 2d 04:10`). Tray → **Start with Windows** makes it start at login (per-user, no admin) with the widgets only (`--tray`); the shortcut or tray → **Open live dashboard** opens the window. Closing the dashboard leaves the tray, widgets and live feed running. Widgets come back where you left them: positions are saved a second after every move or resize. A widget left off every screen (a monitor unplugged or rearranged) moves onto the nearest one.
+One app: a tray icon (red **F1**, with a green dot while live), the desktop widgets (unless you picked live dashboard only), one live connection and the live dashboard window. Right-click the icon for everything else; hover it for the status (`LIVE · Race · L35/62 · recording`, or `next: FP1 in 2d 04:10`). Tray → **Start with Windows** makes it start at login (per-user, no admin) with the widgets only (`--tray`); the shortcut or tray → **Open live dashboard** opens the window. Closing the dashboard leaves the tray, widgets and live feed running. Widgets come back where you left them: positions are saved a second after every move or resize. A widget left off every screen (a monitor unplugged or rearranged) moves onto the nearest one.
 
-Everything the app prints, errors with their full traceback, and FastF1's live client messages go to `%APPDATA%\boxbox\logs\boxbox.log` with a time on each line. It rotates at 1 MB and keeps 5 old files, so a live weekend's problems are still there after a restart. F1 TV tokens are never written to it. FastF1's raw copy of the live feed (`live.txt`) starts afresh past 50 MB, keeping the one before as `live.old.txt`.
+Everything the app prints, errors with their full traceback, and FastF1's live client messages go to `%APPDATA%\lightsout\logs\lightsout.log` with a time on each line. It rotates at 1 MB and keeps 5 old files, so a live weekend's problems are still there after a restart. F1 TV tokens are never written to it. FastF1's raw copy of the live feed (`live.txt`) starts afresh past 50 MB, keeping the one before as `live.old.txt`.
 
 `requirements.txt` pins FastF1 to 3.8.3: the app uses its private F1 TV sign-in and live client code, which can change in any release. Re-test sign-in and a live session before raising it.
 
@@ -85,7 +82,7 @@ One window for the whole weekend, in a dark theme with F1-style condensed type (
   - Qualifying: the header shows Q1/Q2/Q3 (SQ in sprint qualifying) and the time left. Best and gap are for the current part, drop-zone positions are red, knocked-out drivers are greyed.
 - **Tyre stints:** each driver's sets as bars in the compound's colour across the race distance, with the laps on that set (`24`, `*` = used set), stops, and the last stop's stationary time (with F1 TV). A car that comes through the pits on the same tyres (red flag) keeps one stint.
 - **Tyres:** current compound and its age, new or used, sets used so far.
-- **Race control** (scrolls): messages and team radio newest first, with lap, time and flag colour; weather on top. Click **▶ VER radio** to play a clip (again to stop). Each clip gets a transcript underneath, made on your PC by Whisper (`faster-whisper`, `small.en`: ~250 MB downloaded the first time, then about 2 s per clip in the background, newest first). Transcripts are cached in `%APPDATA%\boxbox\radio.json`. Radio is noisy, so expect the odd wrong word.
+- **Race control** (scrolls): messages and team radio newest first, with lap, time and flag colour; weather on top. Click **▶ VER radio** to play a clip (again to stop). Each clip gets a transcript underneath, made on your PC by Whisper (`faster-whisper`, `small.en`: ~250 MB downloaded the first time, then about 2 s per clip in the background, newest first). Transcripts are cached in `%APPDATA%\lightsout\radio.json`. Radio is noisy, so expect the odd wrong word.
 
 Tab choices and splitter sizes are remembered. The toolbar's status shows as chips: the feed (green dot while live), session, lap, and the track status in its flag colour (yellow, SC, VSC, red). The timing tower marks the session's fastest lap in purple, and the sim shows its four likeliest finishes as a bar.
 
@@ -116,7 +113,7 @@ The map also shows:
 - **Smooth cars**: with a live delay of 2 s or more, and in replays, cars glide along a curve fitted to the GPS samples instead of jumping once a second. The samples are placed by their own GPS clock, not by when each message arrived (live messages arrive up to ~1.2 s late, which made cars rubber-band).
 - **Sign in to F1 TV…**: opens FastF1's login page. It needs the **FastF1 Companion** browser extension (Chrome/Edge/Brave/Firefox; the page links it). Log in at formula1.com, then click **Connect FastF1** on the page the extension opens. The app waits up to 30 min, then reconnects with your account (real GPS positions) and keeps the laps logged so far.
 
-The window remembers its size and splitter positions (`%APPDATA%\boxbox\dashboard.json`). Closing it frees the radio transcription model's memory; the tray, widgets and live feed carry on.
+The window remembers its size and splitter positions (`%APPDATA%\lightsout\dashboard.json`). Closing it frees the radio transcription model's memory; the tray, widgets and live feed carry on.
 
 ### Battles
 
@@ -160,10 +157,10 @@ Checked 2026-10-06 against F1's server between sessions, with and without an F1 
 
 The app goes live by itself from 10 minutes before each session of the current weekend (schedule from Jolpica), for the tray widgets and the dashboard alike. It stays live 30 minutes past the scheduled end, and longer while the session is still on and F1 is still sending (a late start, a long red flag). Outside the schedule it checks F1's own streaming flag every 5 minutes, so a session the schedule doesn't have (or has at the wrong time) goes live too. Switch it off with tray → **Go live by itself around every session** or in Settings. Tray → **Go live now** or the dashboard's **● Go live** connect any time; **■ Stop** stops live until that session is over.
 
-Every live session is recorded to `%APPDATA%\boxbox\sessions\<session key>.jsonl` (everything except GPS and car telemetry, which only matter as they arrive). If the app restarts during a session, it replays that file first, so the lap log for the sim, pit stops and race control come back, then takes the server's snapshot of now. Recordings older than 4 days are deleted.
+Every live session is recorded to `%APPDATA%\lightsout\sessions\<session key>.jsonl` (everything except GPS and car telemetry, which only matter as they arrive). If the app restarts during a session, it replays that file first, so the lap log for the sim, pit stops and race control come back, then takes the server's snapshot of now. Recordings older than 4 days are deleted.
 
 - **Without F1 TV:** timing, tyres and gaps are live; car positions on the map are estimated from timing. The app learns where this circuit's timing points really are, and how far round the lap a car is at each moment, from GPS in an earlier session (that weekend's latest, else the circuit's latest in the two seasons before; cached). Measured against real GPS on 2026 races, median distance from the real car: Australia 7 m, Britain 8 m, Spain 8 m, Monaco 8 m, Baku 8 m, Monza 11 m, Suzuka 13 m, Bahrain 18 m (was 90–320 m). Hungary stays ~120 m: its race GPS runs ~2.5 s behind its timing, compared with qualifying, so GPS and timing disagree there. Without a usable earlier session (new layout, other timing loops) it falls back to the old estimate (100–300 m).
-- **With F1 TV:** tray → **Sign in to F1 TV…**, log in in the browser; live reconnects with your account (real GPS positions) and keeps the laps logged so far. The menu item and the dashboard button show the sign-in's state (`signed in to F1 TV until 15 Oct`, `F1 TV sign-in expired: sign in again`). If it runs out before the next session, the tray says so in time to sign in again. An expired sign-in never stalls live: it connects without GPS (FastF1's own token check would open a browser and wait), and all of FastF1's private sign-in code is in `boxbox/auth.py`, so a FastF1 change shows up as a message, not a crash.
+- **With F1 TV:** tray → **Sign in to F1 TV…**, log in in the browser; live reconnects with your account (real GPS positions) and keeps the laps logged so far. The menu item and the dashboard button show the sign-in's state (`signed in to F1 TV until 15 Oct`, `F1 TV sign-in expired: sign in again`). If it runs out before the next session, the tray says so in time to sign in again. An expired sign-in never stalls live: it connects without GPS (FastF1's own token check would open a browser and wait), and all of FastF1's private sign-in code is in `lightsout/auth.py`, so a FastF1 change shows up as a message, not a crash.
 
 Tray → **Replay a past session** (year → weekend → session, same menu as the dashboard's) plays any finished session from 2018 on through the same widgets (speed adjustable), so you can try everything between race weekends.
 
@@ -171,13 +168,13 @@ Tray → **Replay a past session** (year → weekend → session, same menu as t
 
 The main ones are in **Settings → Strategy sim**: safety cars, VSCs and red flags per race, soft / medium / hard tyre life, and the pit loss used when nothing better is known. Each shows the value fitted for the session's regulation era; set one to override it (from the next sim run), or turn it down to `fitted` to go back. A tyre life overrides that compound only.
 
-Everything else lives in `%APPDATA%\boxbox\config.json` under `"model"` (tray → **More sim knobs**), e.g.:
+Everything else lives in `%APPDATA%\lightsout\config.json` under `"model"` (tray → **More sim knobs**), e.g.:
 
 ```json
 "model": {"fuel_start_kg": 70, "pass_threshold": 1.0, "sc_per_race": 0.5}
 ```
 
-Restart the app after editing the file. Defaults and their meanings are in `MODEL` at the top of `boxbox/sim.py`.
+Restart the app after editing the file. Defaults and their meanings are in `MODEL` at the top of `lightsout/sim.py`.
 
 ### What the sim models
 
@@ -198,14 +195,14 @@ Restart the app after editing the file. Defaults and their meanings are in `MODE
 
 Each regulation era is a different car, so the sim is calibrated per era and a session uses its own era's numbers: **2018–2021** (wide cars, DRS), **2022–2025** (ground effect, DRS), **2026–** (new power units, active aero, Overtake Mode). Per-season regulation facts sit on top: minimum mass (733 kg 2018, 743 2019, 746 2020, 752 2021, 798 2022–24, 800 2025, 768 2026) and race start fuel (105 kg limit in 2018, about 100 kg used 2019–25, about 70 kg in 2026).
 
-`boxbox/calibration.json` holds, per era: SC/VSC rates and lengths, SC/VSC lap times, overtaking odds, dry tyre offsets and wear, tyre life (90th percentile stint at the in-lap) and pace uncertainty. Config overrides still win over it. To refit:
+`lightsout/calibration.json` holds, per era: SC/VSC rates and lengths, SC/VSC lap times, overtaking odds, dry tyre offsets and wear, tyre life (90th percentile stint at the in-lap) and pace uncertainty. Config overrides still win over it. To refit:
 
 ```
-.venv\Scripts\python -m boxbox.calibrate --write          # every era (about an hour the first time: downloads ~220 races)
-.venv\Scripts\python -m boxbox.calibrate 2026 --write     # just the 2026 era, after more races
+.venv\Scripts\python -m lightsout.calibrate --write          # every era (about an hour the first time: downloads ~220 races)
+.venv\Scripts\python -m lightsout.calibrate 2026 --write     # just the 2026 era, after more races
 ```
 
-The app does the current era by itself after each race or sprint: once F1's archive has it (a few hours after the flag, checked with every standings refresh, never during a session), it refits in a low-priority background process (`%APPDATA%\boxbox\refit.log`), then says how the backtest moved, e.g. `position error 1.23 → 1.21, real finish in the 80 % range 80% → 81%`. Nothing changes until tray → **Apply new sim fit**. Tray → **Strategy sim accuracy** lists the refits so far (`%APPDATA%\boxbox\refit.json`).
+The app does the current era by itself after each race or sprint: once F1's archive has it (a few hours after the flag, checked with every standings refresh, never during a session), it refits in a low-priority background process (`%APPDATA%\lightsout\refit.log`), then says how the backtest moved, e.g. `position error 1.23 → 1.21, real finish in the 80 % range 80% → 81%`. Nothing changes until tray → **Apply new sim fit**. Tray → **Strategy sim accuracy** lists the refits so far (`%APPDATA%\lightsout\refit.json`).
 
 It prints a backtest per race: lap-time error, finishing-position error, rank correlation, log score of the real result and "pit now" rejoin error, before and after calibration, each race left out of its own fit. Sim started at 30/50/70 % distance:
 
@@ -241,7 +238,7 @@ The race's own stops come first because they beat the published value as soon as
 .venv\Scripts\pip install -r requirements-dev.txt
 .venv\Scripts\python -m pytest                    # unit tests, offline
 .venv\Scripts\python -m pytest -m integration     # downloads real archive data
-.venv\Scripts\python -m boxbox.sim             # backtest the lap-time model on a past race
+.venv\Scripts\python -m lightsout.sim             # backtest the lap-time model on a past race
 .venv\Scripts\python scripts\smoke_replay.py      # offscreen replay through the real widgets
 ```
 
@@ -253,4 +250,4 @@ Manual test steps: [docs/TESTING.md](docs/TESTING.md). Live weekend checklist: [
 - F1 live timing (via [FastF1](https://github.com/theOehrly/Fast-F1)): live data and the session archive
 - [MultiViewer](https://multiviewer.app) circuit API: track outlines and pit loss
 
-Not affiliated with Formula 1. Responses are cached in `%APPDATA%\boxbox\cache`.
+Not affiliated with Formula 1. Responses are cached in `%APPDATA%\lightsout\cache`.

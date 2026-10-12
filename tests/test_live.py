@@ -1,7 +1,7 @@
 import json
 import time
 
-from boxbox import live
+from lightsout import live
 
 
 def test_delay_holds_live_data_until_it_is_old_enough():
@@ -76,7 +76,7 @@ def test_quali_part_and_drop_zone():
 
 def test_tyre_colours_follow_the_season():
     """Pirelli 2018: seven dry compounds, soft yellow / medium white / hard ice blue. From 2019: soft red, medium yellow, hard white."""
-    from boxbox.widgets import tyre_style
+    from lightsout.widgets import tyre_style
     st = live.State()
     st.apply('SessionInfo', {'StartDate': '2018-03-25T16:10:00'}, 0)
     assert [tyre_style(c, st)[0] for c in ('HYPERSOFT', 'ULTRASOFT', 'SUPERSOFT', 'SUPERHARD')] == ['HS', 'US', 'SS', 'SH']
@@ -173,7 +173,7 @@ def test_marshal_sectors_snap_in_lap_order_and_the_last_wraps():
 
 def test_same_tyres_through_the_pits_stay_one_stint():
     """Red flag: F1 opens a new stint with TyresNotChanged '1' for cars that keep their tyres."""
-    from boxbox.widgets import stints
+    from lightsout.widgets import stints
     st = live.State()
     st.apply('TimingAppData', {'Lines': {'1': {'Stints': [
         {'Compound': 'INTERMEDIATE', 'New': 'true', 'TyresNotChanged': '0', 'TotalLaps': 2, 'StartLaps': 0},
@@ -183,7 +183,7 @@ def test_same_tyres_through_the_pits_stay_one_stint():
 
 
 def test_radio_transcript_cached_and_queued_once(monkeypatch):
-    from boxbox import radio
+    from lightsout import radio
     monkeypatch.setattr(radio, '_done', {'u1': 'box box'})
     monkeypatch.setattr(radio, '_asked', set())
     monkeypatch.setattr(radio, '_worker', object())  # pretend it runs: nothing transcribes in a test

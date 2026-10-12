@@ -79,7 +79,7 @@ class Settings(QDialog):
     can't be held back again: spoilers)."""
 
     def __init__(self, app):
-        super().__init__(None, windowTitle='Box Box settings')
+        super().__init__(None, windowTitle='Lights Out settings')
         self.app = app
         self.setWindowIcon(icon())
         self.setStyleSheet(STYLE)
@@ -235,7 +235,7 @@ class Dashboard(QMainWindow):
         # the docked panels' row counts are the dashboard's own; everything else is the app's config
         self.cfg = collections.ChainMap({'widgets': {k: {'n': 22 if k == 'tower' else 0} for k in (
             'map', 'tower', 'sim', 'stints', 'rc', 'sectors', 'tyres', 'battles')}}, app.cfg)
-        self.setWindowTitle('Box Box')
+        self.setWindowTitle('Lights Out')
         self.setWindowIcon(icon())
         self.setStyleSheet(STYLE)
 
@@ -273,7 +273,7 @@ class Dashboard(QMainWindow):
 
         bar = QToolBar(movable=False)
         self.addToolBar(bar)
-        bar.addWidget(QLabel(f"<span style='color:{ACCENT}'>▰</span> BOX BOX", objectName='brand'))
+        bar.addWidget(QLabel(f"<span style='color:{ACCENT}'>▰</span> LIGHTS OUT", objectName='brand'))
         self.live_btn = bar.addAction('● Go live', self.go_live)
         bar.widgetForAction(self.live_btn).setObjectName('live')
         rp = QToolButton(text='Replay', popupMode=QToolButton.InstantPopup)

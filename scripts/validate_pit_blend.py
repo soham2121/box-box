@@ -13,7 +13,7 @@ sys.stdout.reconfigure(encoding='utf-8')
 import fastf1
 import numpy as np
 fastf1.set_log_level('ERROR')
-from boxbox import calibrate as c, live, sim
+from lightsout import calibrate as c, live, sim
 
 WEIGHTS = ('api', 0, 2, 4, 6, 10)
 

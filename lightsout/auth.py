@@ -10,7 +10,7 @@ from http.server import HTTPServer
 
 SIGNIN_HELP = ('Needs the "FastF1 Companion" browser extension (the page links it). Log in at formula1.com, '
                'then click "Connect FastF1" on the page the extension opens.')
-log = logging.getLogger('boxbox.auth')
+log = logging.getLogger('lightsout.auth')
 _signin_port = None  # port of a sign-in still waiting for the browser
 
 

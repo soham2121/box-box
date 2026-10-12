@@ -1,6 +1,6 @@
 import logging
 
-from boxbox import main
+from lightsout import main
 
 
 def test_tokens_never_reach_the_log():

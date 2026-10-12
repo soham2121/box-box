@@ -1,12 +1,12 @@
 # Singapore GP live test (9–11 Oct 2026)
 
-**Outcome (race day, 11 Oct).** The app has since become **Box Box**, one app with the dashboard as its window (F1 Live / F1 Tracker below are the old names). What the race showed, and what changed:
+**Outcome (race day, 11 Oct).** The app has since become **Lights Out**, one app with the dashboard as its window (F1 Live / F1 Tracker below are the old names). What the race showed, and what changed:
 - Cars on the map rubber-banded at any delay: live GPS messages arrive up to 1.2 s late and were timed by arrival. Now timed by their own GPS clock (841 → 0 frames with a car going backwards, on 2 min of the race).
 - Restarting the dashboard lost the lap log: live sessions are now recorded and replayed after a restart.
 - The pit marker sat ~3 s too far back: MultiViewer publishes 27.6 s for Singapore, the race's stops measured 24.2 s. The race's own stops now come first (from the third).
 - `PitStopSeries` never arrived live, even with F1 TV: pit stops come from the lap pit flags live.
-- Item 10 (going live by itself) was built after the weekend: by the schedule, F1's streaming flag and sessions running late. To be tested live at the US GP (checklist in TESTING.md, section "One app, battles, alerts, Box Box").
-- Logs are now `%APPDATA%\boxbox\logs\boxbox.log` (rotating); `live.log` / `tray.log` below are the old names.
+- Item 10 (going live by itself) was built after the weekend: by the schedule, F1's streaming flag and sessions running late. To be tested live at the US GP (checklist in TESTING.md, section "One app, battles, alerts, Lights Out").
+- Logs are now `%APPDATA%\lightsout\logs\lightsout.log` (rotating); `live.log` / `tray.log` below are the old names.
 
 First real live test of the app. Times are India time (IST), from the Next race widget.
 
@@ -54,11 +54,11 @@ Open **F1 Live** ~5 min before the start.
 
 ## Also this weekend
 - Item 10 (automatic live-session detection) gets built and tested on these sessions.
-- After the race: refit the 2026 sim (`python -m boxbox.calibrate 2026 --write`).
+- After the race: refit the 2026 sim (`python -m lightsout.calibrate 2026 --write`).
 
 ## After the weekend — send me
-- `%APPDATA%\boxbox\live.txt`: raw live recording (shows whether pit-stop times arrive live with F1 TV)
-- `%APPDATA%\boxbox\live.log` and `tray.log`: any errors
+- `%APPDATA%\lightsout\live.txt`: raw live recording (shows whether pit-stop times arrive live with F1 TV)
+- `%APPDATA%\lightsout\live.log` and `tray.log`: any errors
 - Screenshots of anything that looked wrong, with the session and lap
 
-Paste `%APPDATA%\boxbox` into the Explorer address bar to open that folder.
+Paste `%APPDATA%\lightsout` into the Explorer address bar to open that folder.

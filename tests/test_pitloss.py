@@ -1,7 +1,7 @@
 import pytest
 
 from conftest import make_race
-from boxbox import live, sim
+from lightsout import live, sim
 
 STOPS = [('2', 12), ('4', 14), ('6', 16), ('8', 18)]
 

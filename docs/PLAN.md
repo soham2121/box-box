@@ -1,6 +1,6 @@
-# Box Box (was F1 Tracker) — correctness fixes + feature plan
+# Lights Out (was F1 Tracker) — correctness fixes + feature plan
 
-**Status (2026-10-11, on `main` via PR #5 and #6):** Groups 1–4 done; Group 3 item 10 (schedule + F1's streaming flag + late-running sessions, switch in Settings) still to be tested live at the US GP (FP1 23 Oct). Group 5: 18, 19 and 20 done, 21 (PyInstaller) to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Box Box**. Progress: [CHECKLIST.md](CHECKLIST.md).
+**Status (2026-10-11, on `main` via PR #5 and #6):** Groups 1–4 done; Group 3 item 10 (schedule + F1's streaming flag + late-running sessions, switch in Settings) still to be tested live at the US GP (FP1 23 Oct). Group 5: 18, 19 and 20 done, 21 (PyInstaller) to do. Also done on request: SC / VSC / red flag in the sim, per-era calibration, dashboard restyle, one app with battles and alerts, renamed **Lights Out**. Progress: [CHECKLIST.md](CHECKLIST.md).
 
 ## Decisions log (changes to the plan below, with evidence)
 - **With F1 TV (checked 2026-10-06):** Position.z, CarData.z and ChampionshipPrediction arrive. PitStopSeries was not in the snapshot; check in a live session via live.txt, the fallback covers it.
@@ -27,13 +27,13 @@
   - **Tray and dashboard became one app** (user's call): one live connection, one recording, one settings file; alerts need to know whether the dashboard is open.
   - **Item 10 by the schedule**, not by polling `StreamingStatus.json`: live from 10 min before each session to 30 min after. Simpler and enough for the schedule we have; a session that overruns by more than 30 min is the known gap.
   - **Sim fit keeps traffic laps** for a driver who'd have fewer than 3 laps without them (Bahrain 2026: HAM P9 simulated at P21). All eras better out of sample (2026 position error 1.21 → 1.13).
-  - **Renamed Box Box** (user's choice), repo `soham2121/box-box`.
+  - **Renamed Box Box** (user's choice, later **Lights Out**), repo `soham2121/box-box`.
 - **2026-10-07, fitted "who pits under SC/VSC" model kept (user's call).** Out of sample it loses 0.02–0.05 places of mean error to a worn-tyre rule but wins on log score, pit/no-pit calibration and the spread of stops per SC. The user prefers realistic distributions to a slightly better mean.
 
 ## Context
 The user's spec lists 20 items in 5 priority groups. Most urgent: the strategy sim gives nonsense at Bahrain 2026. Pit loss shows 105 s instead of about 22 s, so the panel says "rejoin P19" and "loses 12.98 places". Work runs group by group. After each group: update the docs, give a summary and a full manual test plan, then **stop and wait for the user**. **No git commits** (the user commits).
 
-Codebase: `boxbox/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 lines). `.venv` is installed (Python 3.11, fastf1 3.8.3, PySide6 6.11.2).
+Codebase: `lightsout/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 lines). `.venv` is installed (Python 3.11, fastf1 3.8.3, PySide6 6.11.2).
 
 ## Facts verified during planning (read-only probes + web)
 - **Bahrain root cause.**
@@ -63,7 +63,7 @@ Codebase: `boxbox/` (data.py, live.py, sim.py, widgets.py, main.py; ~1,400 lines
 2. Implement with the smallest diff that fits the current architecture. Keep network work off the UI thread, and keep the cache, IPv4-first and config compatibility.
 3. Validate:
    - `pytest`
-   - `python -m boxbox.sim` (Azerbaijan backtest; lap MAE must stay ≤ 0.36 s)
+   - `python -m lightsout.sim` (Azerbaijan backtest; lap MAE must stay ≤ 0.36 s)
    - multi-race backtest (from group 2)
    - offscreen Bahrain replay smoke script
    - app launch check
@@ -132,10 +132,10 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Lapped cars yield (blue flags).
   - Pit/SC states respected.
   - Still O(D) per lap.
-- **9. Calibration.** `python -m boxbox.calibrate` runs across N archived races (2026 + 2025):
+- **9. Calibration.** `python -m lightsout.calibrate` runs across N archived races (2026 + 2025):
   - Fits `sc_prob`/`sc_laps`/VSC rate from TrackStatus, SC/VSC pit-loss ratios from MultiViewer, and pass parameters from observed position changes.
   - Leave-one-race-out validation.
-  - Writes `boxbox/calibration.json`, which config `model` overrides still beat.
+  - Writes `lightsout/calibration.json`, which config `model` overrides still beat.
   - Multi-race backtest table: lap MAE, rank correlation, rejoin error.
 
 ## Group 3 — Live / data
@@ -159,11 +159,11 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Saves to the existing `cfg['model']` keys and applies immediately (`App.model()` is already read per run).
   - Replaces the `open_config` JSON hack (main.py:227).
 - **16. Desktop layer.** Research and test the WorkerW/Progman `SetParent` via ctypes on build 26200, keeping dragging, resizing and saved positions. If Windows blocks it: explain, keep on-top mode, and offer a re-show-after-Win+D fallback. **Ask the user if neither works acceptably.**
-- **17. Logging.** `boxbox/log.py`:
-  - `RotatingFileHandler` to `%APPDATA%\boxbox\logs\boxbox.log` (1 MB × 5), plus a console handler when not frozen.
+- **17. Logging.** `lightsout/log.py`:
+  - `RotatingFileHandler` to `%APPDATA%\lightsout\logs\lightsout.log` (1 MB × 5), plus a console handler when not frozen.
   - `bg()` logs exceptions with tracebacks. The prints in live.py are replaced.
   - Tokens are never logged.
-- **(15-auth)** All FastF1 private auth calls move into one `boxbox/auth.py` with try/except and clear user messages, so the app does not crash if FastF1 internals change. The live feed avoids `get_auth_token()`'s blocking re-auth by checking token expiry before connecting.
+- **(15-auth)** All FastF1 private auth calls move into one `lightsout/auth.py` with try/except and clear user messages, so the app does not crash if FastF1 internals change. The live feed avoids `get_auth_token()`'s blocking re-auth by checking token expiry before connecting.
 
 ## Group 5 — Distribution
 - **18. requirements.txt.** Direct deps only: `fastf1==3.8.3` (pinned for the private API), PySide6, numpy, scipy, requests, with tested lower bounds.
@@ -171,26 +171,26 @@ Dev deps: `requirements-dev.txt` (pytest now, pyinstaller in group 5).
   - Data cache (fresh, stale refresh, offline → stale fallback, mocked `requests`).
   - Sim (deg, tyre changes, SC, VSC, wet, two-compound rule, race completes).
   - Replay (starts, speed timing, finishes) with fake message lists.
-- **20. Start with Windows.** HKCU `...\CurrentVersion\Run` value via stdlib `winreg` (no admin); `pythonw -m boxbox.main` or the frozen exe path. Off by default, tray/settings toggle.
+- **20. Start with Windows.** HKCU `...\CurrentVersion\Run` value via stdlib `winreg` (no admin); `pythonw -m lightsout.main` or the frozen exe path. Off by default, tray/settings toggle.
 - **21. Packaging.**
-  - PyInstaller one-dir windowed `boxbox.spec` + `build.ps1`.
+  - PyInstaller one-dir windowed `lightsout.spec` + `build.ps1`.
   - Research FastF1/PySide6/signalrcore hidden imports, and the browser-auth callback in a frozen build.
-  - Build and launch the exe. Config/cache/logs stay in `%APPDATA%\boxbox`.
+  - Build and launch the exe. Config/cache/logs stay in `%APPDATA%\lightsout`.
 
 ## Critical files
-- `boxbox/main.py`: the app (tray menu, config, the one live feed and going live by itself, alerts check, sim refit, log setup)
-- `boxbox/dashboard.py`: the dashboard window and the Settings dialog
-- `boxbox/live.py`: State (merge, laps, GPS trail, delay, sync, still_on), ReplayFeed, LiveFeed (recording, restore), Track
-- `boxbox/sim.py`: pit_loss, fit / clean, simulate, rejoin, best_window, stops_owed, battle, season_model, backtest
-- `boxbox/widgets.py`: desktop widgets and dashboard panels (map, tower, sim, battles, stints, race control)
-- `boxbox/alerts.py`, `boxbox/auth.py` (F1 TV), `boxbox/radio.py`, `boxbox/calibrate.py`, `boxbox/data.py` (Jolpica, archive, cache, streaming flag)
+- `lightsout/main.py`: the app (tray menu, config, the one live feed and going live by itself, alerts check, sim refit, log setup)
+- `lightsout/dashboard.py`: the dashboard window and the Settings dialog
+- `lightsout/live.py`: State (merge, laps, GPS trail, delay, sync, still_on), ReplayFeed, LiveFeed (recording, restore), Track
+- `lightsout/sim.py`: pit_loss, fit / clean, simulate, rejoin, best_window, stops_owed, battle, season_model, backtest
+- `lightsout/widgets.py`: desktop widgets and dashboard panels (map, tower, sim, battles, stints, race control)
+- `lightsout/alerts.py`, `lightsout/auth.py` (F1 TV), `lightsout/radio.py`, `lightsout/calibrate.py`, `lightsout/data.py` (Jolpica, archive, cache, streaming flag)
 - `tests/`, `scripts/` (smoke_replay, smoke_dashboard, validate_pit_blend, validate_pit_neutral, create_shortcuts), `docs/*.md`
-- Still to come with item 21: `boxbox.spec`, `build.ps1`
+- Still to come with item 21: `lightsout.spec`, `build.ps1`
 
 ## Verification (every group)
 - `.venv\Scripts\python -m pytest -q` (unit; `-m integration` for archive tests)
-- `.venv\Scripts\python -m boxbox.sim`: Azerbaijan lap MAE ≤ 0.36, rejoin, rank correlation
-- From group 2: `python -m boxbox.calibrate --report` (multi-race metrics table)
+- `.venv\Scripts\python -m lightsout.sim`: Azerbaijan lap MAE ≤ 0.36, rejoin, rank correlation
+- From group 2: `python -m lightsout.calibrate --report` (multi-race metrics table)
 - `PYTHONPATH=. python scripts/smoke_replay.py`: Bahrain lap-11 pit loss, rejoin, what-if, tower, map, standings
-- Launch `python -m boxbox.main` for real and confirm the tray and widgets come up, then quit.
+- Launch `python -m lightsout.main` for real and confirm the tray and widgets come up, then quit.
 - Untestable now, to be listed each time: live session (next is Singapore FP1, Oct 9), F1 TV login, Win+D on other Windows builds.

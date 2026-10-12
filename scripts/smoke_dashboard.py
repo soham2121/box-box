@@ -7,10 +7,10 @@ os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 sys.stdout.reconfigure(encoding='utf-8')
 sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
 from PySide6.QtWidgets import QApplication
-from boxbox import live, main, widgets
+from lightsout import live, main, widgets
 tmp = Path(tempfile.mkdtemp())
 main.CONFIG, main.DASH_SETTINGS = tmp / 'config.json', tmp / 'dashboard.json'
-from boxbox import dashboard
+from lightsout import dashboard
 dashboard.SETTINGS = main.DASH_SETTINGS
 qa = QApplication([])
 app = main.App(qa)

@@ -1,6 +1,7 @@
+import copy
 import json
 
-from boxbox import main
+from lightsout import main
 
 
 def test_old_single_opacity_becomes_text_and_background(tmp_path, monkeypatch):
@@ -23,7 +24,7 @@ def test_new_settings_are_kept_and_defaults_fill_in(tmp_path, monkeypatch):
 def test_f1tv_check_says_why_without_crashing(tmp_path, monkeypatch):
     """No token, an expired one, or FastF1's private sign-in code changed: a message, never an exception or a wait."""
     from fastf1.internals import f1auth
-    from boxbox import auth
+    from lightsout import auth
     monkeypatch.setattr(f1auth, 'AUTH_DATA_FILE', tmp_path / 'token')
     assert auth.check() == (None, 'not signed in to F1 TV', None)
     (tmp_path / 'token').write_text('eyJhbGciOiJSUzI1NiJ9.eyJleHAiOjF9.c2ln')
@@ -36,3 +37,31 @@ def test_f1tv_check_says_why_without_crashing(tmp_path, monkeypatch):
     monkeypatch.delattr(f1auth, '_verify_jwt')
     token, text, _ = auth.check()
     assert token is None and "FastF1's sign-in code changed (no _verify_jwt)" in text
+
+
+def test_live_dashboard_only_shows_no_desktop_widgets():
+    from types import SimpleNamespace
+    shown = []
+    app = SimpleNamespace(cfg=copy.deepcopy(main.DEFAULTS), show=shown.append)
+    assert app.cfg['desktop_widgets'] is True
+    main.App.show_widgets(app)
+    assert shown == ['drivers', 'teams', 'next']  # the ones on by default
+    shown.clear()
+    app.cfg['desktop_widgets'] = False
+    main.App.show_widgets(app)
+    assert shown == []
+
+
+def test_old_app_folder_moves_to_lightsout(tmp_path, monkeypatch):
+    import importlib
+    from lightsout import data
+    (tmp_path / 'boxbox').mkdir()
+    (tmp_path / 'boxbox' / 'config.json').write_text('{}')
+    monkeypatch.setenv('APPDATA', str(tmp_path))
+    try:
+        importlib.reload(data)
+        assert data.APP_DIR == tmp_path / 'lightsout'
+        assert (data.APP_DIR / 'config.json').exists() and not (tmp_path / 'boxbox').exists()
+    finally:
+        monkeypatch.undo()
+        importlib.reload(data)
