@@ -1,5 +1,5 @@
 <p align="center">
-  <img src="docs/banner.svg" alt="Lights Out: cars lapping Marina Bay under five start lights" width="100%">
+  <img src="docs/banner.svg?v=2" alt="Lights Out: cars lapping Marina Bay under five start lights" width="100%">
 </p>
 
 <p align="center">
